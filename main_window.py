@@ -1,27 +1,20 @@
 """
-主应用程序窗口
+主应用程序窗口 - 支持视频录制和标注两个页面
 """
 import sys
 import os
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QGroupBox, QFrame, QPushButton, QLabel, QListWidget, QListWidgetItem,
-    QFileDialog, QMessageBox, QGridLayout, QStatusBar, QMenuBar, QToolBar
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QTabWidget, QMenuBar, QToolBar, QStatusBar, QMessageBox
 )
-from PyQt6.QtCore import Qt, QSettings, QTimer
-from PyQt6.QtGui import QAction, QKeySequence, QIcon, QPixmap, QColor
-from PyQt6.QtMultimedia import QMediaPlayer
-from PyQt6.QtMultimediaWidgets import QVideoWidget
+from PyQt6.QtCore import Qt, QSettings, pyqtSlot
+from PyQt6.QtGui import QAction, QKeySequence, QIcon
 
-# 导入自定义模块
+# 导入页面组件
 try:
-    from models import AnnotationMarker, VideoInfo
-    from annotation_manager import AnnotationManager
-    from video_player import VideoPlayerManager
-    from widgets.timeline_widget import TimelineWidget
-    from widgets.annotation_dialog import AnnotationDialog
+    from recording_page import RecordingPage
+    from annotation_page import AnnotationPage
     from styles import StyleSheet, ColorPalette
-    from utils import TimeUtils, FileUtils
 except ImportError as e:
     print(f"导入错误: {e}")
     print("请确保所有模块文件都在正确位置")
@@ -34,23 +27,10 @@ class VideoAnnotationMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        # 核心组件
-        self.annotation_manager = AnnotationManager()
-        self.video_player = None  # 将在setup_ui中初始化
-
-        # UI组件
-        self.video_widget = None
-        self.timeline = None
-        self.play_button = None
-        self.time_label = None
-        self.annotation_list = None
-        self.stats_label = None
-        self.mark_start_button = None
-        self.mark_end_button = None
-
-        # 状态
-        self.marking_start = False
-        self.temp_start_time = 0.0
+        # 页面组件
+        self.recording_page = None
+        self.annotation_page = None
+        self.tab_widget = None
 
         # 设置
         self.settings = QSettings("VideoAnnotationTool", "Settings")
@@ -67,194 +47,97 @@ class VideoAnnotationMainWindow(QMainWindow):
     def setup_ui(self):
         """设置用户界面"""
         self.setWindowTitle("AI视频动作标注工具")
-        self.setGeometry(100, 100, 1400, 800)
+        self.setGeometry(100, 100, 1600, 900)
 
         # 创建中央部件
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
         # 主布局
-        main_layout = QHBoxLayout(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # 创建分割器
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_layout.addWidget(splitter)
+        # 创建选项卡控件
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setTabPosition(QTabWidget.TabPosition.North)
+        main_layout.addWidget(self.tab_widget)
 
-        # 左侧：视频播放区域
-        video_section = self.create_video_section()
-        splitter.addWidget(video_section)
-
-        # 右侧：控制面板
-        control_panel = self.create_control_panel()
-        splitter.addWidget(control_panel)
-
-        # 设置分割比例
-        splitter.setSizes([1000, 400])
+        # 创建页面
+        self.create_pages()
 
         # 创建菜单栏、工具栏和状态栏
         self.create_menu_bar()
         self.create_toolbar()
         self.create_status_bar()
 
-        # 初始化视频播放器
-        self.video_player = VideoPlayerManager(self.video_widget)
+    def create_pages(self):
+        """创建页面"""
+        # 视频录制页面
+        self.recording_page = RecordingPage()
+        self.tab_widget.addTab(self.recording_page, "📹 视频录制")
 
-    def create_video_section(self) -> QWidget:
-        """创建视频播放区域"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(10)
+        # 视频标注页面
+        self.annotation_page = AnnotationPage()
+        self.tab_widget.addTab(self.annotation_page, "🎯 视频标注")
 
-        # 视频显示区域
-        self.video_widget = QVideoWidget()
-        self.video_widget.setMinimumSize(800, 450)
-        layout.addWidget(self.video_widget)
+        # 设置标签样式
+        self.tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #555;
+                background-color: #2b2b2b;
+            }
+            QTabWidget::tab-bar {
+                alignment: center;
+            }
+            QTabBar::tab {
+                background-color: #3c3c3c;
+                color: white;
+                padding: 12px 24px;
+                margin-right: 2px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                font-weight: bold;
+            }
+            QTabBar::tab:selected {
+                background-color: #0078d4;
+            }
+            QTabBar::tab:hover {
+                background-color: #4a4a4a;
+            }
+            QTabBar::tab:selected:hover {
+                background-color: #106ebe;
+            }
+        """)
 
-        # 播放控制
-        controls = self.create_playback_controls()
-        layout.addWidget(controls)
+    def setup_connections(self):
+        """设置信号连接"""
+        # 录制页面信号
+        if self.recording_page:
+            self.recording_page.recording_completed.connect(self.on_recording_completed)
 
-        # 时间线组
-        timeline_group = QGroupBox("时间线控制")
-        timeline_layout = QVBoxLayout(timeline_group)
+        # 选项卡切换信号
+        self.tab_widget.currentChanged.connect(self.on_tab_changed)
 
-        self.timeline = TimelineWidget()
-        timeline_layout.addWidget(self.timeline)
+    @pyqtSlot(str)
+    def on_recording_completed(self, video_path: str):
+        """录制完成后的处理"""
+        # 切换到标注页面
+        self.tab_widget.setCurrentIndex(1)  # 标注页面索引为1
 
-        layout.addWidget(timeline_group)
+        # 加载录制的视频到标注页面
+        if self.annotation_page:
+            if self.annotation_page.load_video(video_path):
+                self.statusBar().showMessage(f"已自动加载录制的视频: {os.path.basename(video_path)}")
+            else:
+                QMessageBox.warning(self, "警告", "无法加载录制的视频文件")
 
-        return widget
-
-    def create_playback_controls(self) -> QWidget:
-        """创建播放控制"""
-        widget = QFrame()
-        widget.setFrameStyle(QFrame.Shape.StyledPanel)
-        layout = QHBoxLayout(widget)
-        layout.setSpacing(10)
-
-        # 播放控制按钮
-        self.play_button = QPushButton("播放")
-        self.play_button.setEnabled(False)
-        layout.addWidget(self.play_button)
-
-        stop_button = QPushButton("停止")
-        stop_button.setEnabled(False)
-        layout.addWidget(stop_button)
-
-        # 时间显示
-        self.time_label = QLabel("00:00 / 00:00")
-        self.time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.time_label.setMinimumWidth(120)
-        layout.addWidget(self.time_label)
-
-        layout.addStretch()
-
-        # 标注控制按钮
-        self.mark_start_button = QPushButton("标记起点")
-        self.mark_start_button.setStyleSheet(f"QPushButton {{ background-color: {ColorPalette.SUCCESS}; }}")
-        self.mark_start_button.setEnabled(False)
-        layout.addWidget(self.mark_start_button)
-
-        self.mark_end_button = QPushButton("标记终点")
-        self.mark_end_button.setStyleSheet(f"QPushButton {{ background-color: {ColorPalette.ERROR}; }}")
-        self.mark_end_button.setEnabled(False)
-        layout.addWidget(self.mark_end_button)
-
-        # 连接事件
-        self.play_button.clicked.connect(self.toggle_playback)
-        stop_button.clicked.connect(self.stop_playback)
-        self.mark_start_button.clicked.connect(self.mark_start)
-        self.mark_end_button.clicked.connect(self.mark_end)
-
-        return widget
-
-    def create_control_panel(self) -> QWidget:
-        """创建右侧控制面板"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(15)
-
-        # 快速标注组
-        quick_group = self.create_quick_annotation_group()
-        layout.addWidget(quick_group)
-
-        # 标注列表组
-        list_group = self.create_annotation_list_group()
-        layout.addWidget(list_group)
-
-        # 统计信息
-        self.stats_label = QLabel("总计: 0 个标注")
-        self.stats_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.stats_label.setStyleSheet("font-size: 12px; color: #999; padding: 10px;")
-        layout.addWidget(self.stats_label)
-
-        return widget
-
-    def create_quick_annotation_group(self) -> QGroupBox:
-        """创建快速标注组"""
-        group = QGroupBox("快速标注")
-        layout = QGridLayout(group)
-        layout.setSpacing(8)
-
-        # 快速标注按钮
-        quick_actions = [
-            ("跳跃", ColorPalette.ANNOTATION_COLORS["跳跃"]),
-            ("跑步", ColorPalette.ANNOTATION_COLORS["跑步"]),
-            ("走路", ColorPalette.ANNOTATION_COLORS["走路"]),
-            ("静止", ColorPalette.ANNOTATION_COLORS["静止"])
-        ]
-
-        for i, (label, color) in enumerate(quick_actions):
-            btn = QPushButton(label)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {color};
-                    color: white;
-                    font-weight: bold;
-                    border-radius: 6px;
-                    padding: 8px;
-                    min-height: 20px;
-                }}
-                QPushButton:hover {{
-                    background-color: {color}DD;
-                }}
-                QPushButton:pressed {{
-                    background-color: {color}BB;
-                }}
-            """)
-            btn.clicked.connect(lambda checked, l=label, c=color: self.quick_annotation(l, c))
-            layout.addWidget(btn, i // 2, i % 2)
-
-        return group
-
-    def create_annotation_list_group(self) -> QGroupBox:
-        """创建标注列表组"""
-        group = QGroupBox("标注列表")
-        layout = QVBoxLayout(group)
-
-        # 标注列表
-        self.annotation_list = QListWidget()
-        self.annotation_list.itemDoubleClicked.connect(self.edit_annotation)
-        layout.addWidget(self.annotation_list)
-
-        # 操作按钮
-        button_layout = QHBoxLayout()
-
-        edit_btn = QPushButton("编辑")
-        edit_btn.clicked.connect(self.edit_selected_annotation)
-        button_layout.addWidget(edit_btn)
-
-        delete_btn = QPushButton("删除")
-        delete_btn.clicked.connect(self.delete_selected_annotation)
-        button_layout.addWidget(delete_btn)
-
-        clear_btn = QPushButton("清空")
-        clear_btn.clicked.connect(self.clear_all_annotations)
-        button_layout.addWidget(clear_btn)
-
-        layout.addLayout(button_layout)
-
-        return group
+    def on_tab_changed(self, index):
+        """选项卡切换处理"""
+        if index == 0:
+            self.statusBar().showMessage("当前页面: 视频录制")
+        elif index == 1:
+            self.statusBar().showMessage("当前页面: 视频标注")
 
     def create_menu_bar(self):
         """创建菜单栏"""
@@ -263,11 +146,28 @@ class VideoAnnotationMainWindow(QMainWindow):
         # 文件菜单
         file_menu = menubar.addMenu("文件")
 
-        # 打开视频
-        open_action = QAction("打开视频", self)
-        open_action.setShortcut(QKeySequence.StandardKey.Open)
-        open_action.triggered.connect(self.open_video)
-        file_menu.addAction(open_action)
+        # 录制相关
+        recording_submenu = file_menu.addMenu("录制")
+
+        switch_to_recording_action = QAction("切换到录制页面", self)
+        switch_to_recording_action.setShortcut("Ctrl+R")
+        switch_to_recording_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(0))
+        recording_submenu.addAction(switch_to_recording_action)
+
+        # 标注相关
+        annotation_submenu = file_menu.addMenu("标注")
+
+        switch_to_annotation_action = QAction("切换到标注页面", self)
+        switch_to_annotation_action.setShortcut("Ctrl+A")
+        switch_to_annotation_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(1))
+        annotation_submenu.addAction(switch_to_annotation_action)
+
+        annotation_submenu.addSeparator()
+
+        open_video_action = QAction("打开视频文件", self)
+        open_video_action.setShortcut(QKeySequence.StandardKey.Open)
+        open_video_action.triggered.connect(self.open_video_for_annotation)
+        annotation_submenu.addAction(open_video_action)
 
         file_menu.addSeparator()
 
@@ -306,19 +206,6 @@ class VideoAnnotationMainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # 编辑菜单
-        edit_menu = menubar.addMenu("编辑")
-
-        undo_action = QAction("撤销", self)
-        undo_action.setShortcut(QKeySequence.StandardKey.Undo)
-        undo_action.setEnabled(False)  # TODO: 实现撤销功能
-        edit_menu.addAction(undo_action)
-
-        redo_action = QAction("重做", self)
-        redo_action.setShortcut(QKeySequence.StandardKey.Redo)
-        redo_action.setEnabled(False)  # TODO: 实现重做功能
-        edit_menu.addAction(redo_action)
-
         # 视图菜单
         view_menu = menubar.addMenu("视图")
 
@@ -327,8 +214,19 @@ class VideoAnnotationMainWindow(QMainWindow):
         fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
 
+        # 工具菜单
+        tools_menu = menubar.addMenu("工具")
+
+        settings_action = QAction("设置", self)
+        settings_action.triggered.connect(self.show_settings)
+        tools_menu.addAction(settings_action)
+
         # 帮助菜单
         help_menu = menubar.addMenu("帮助")
+
+        user_guide_action = QAction("使用指南", self)
+        user_guide_action.triggered.connect(self.show_user_guide)
+        help_menu.addAction(user_guide_action)
 
         about_action = QAction("关于", self)
         about_action.triggered.connect(self.show_about)
@@ -339,22 +237,35 @@ class VideoAnnotationMainWindow(QMainWindow):
         toolbar = QToolBar("主工具栏")
         self.addToolBar(toolbar)
 
-        # 打开视频
-        open_action = QAction("打开", self)
-        open_action.triggered.connect(self.open_video)
-        toolbar.addAction(open_action)
+        # 页面切换
+        recording_action = QAction("录制", self)
+        recording_action.setToolTip("切换到视频录制页面")
+        recording_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(0))
+        toolbar.addAction(recording_action)
+
+        annotation_action = QAction("标注", self)
+        annotation_action.setToolTip("切换到视频标注页面")
+        annotation_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(1))
+        toolbar.addAction(annotation_action)
 
         toolbar.addSeparator()
 
-        # 播放控制
-        play_action = QAction("播放", self)
-        play_action.triggered.connect(self.toggle_playback)
-        toolbar.addAction(play_action)
+        # 文件操作
+        open_action = QAction("打开", self)
+        open_action.setToolTip("打开视频文件进行标注")
+        open_action.triggered.connect(self.open_video_for_annotation)
+        toolbar.addAction(open_action)
+
+        save_action = QAction("保存", self)
+        save_action.setToolTip("保存当前项目")
+        save_action.triggered.connect(self.save_project)
+        toolbar.addAction(save_action)
 
         toolbar.addSeparator()
 
         # 导出
         export_action = QAction("导出", self)
+        export_action.setToolTip("导出标注数据")
         export_action.triggered.connect(self.export_annotations)
         toolbar.addAction(export_action)
 
@@ -362,27 +273,7 @@ class VideoAnnotationMainWindow(QMainWindow):
         """创建状态栏"""
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 - 请打开视频文件开始标注")
-
-    def setup_connections(self):
-        """设置信号连接"""
-        # 时间线连接将在video_player初始化后设置
-        pass
-
-    def setup_video_connections(self):
-        """设置视频相关连接"""
-        if self.video_player and self.timeline:
-            # 视频播放器信号
-            self.video_player.duration_changed.connect(self.timeline.set_duration)
-            self.video_player.position_changed.connect(self.timeline.set_position)
-            self.video_player.position_changed.connect(self.update_time_display)
-            self.video_player.playback_state_changed.connect(self.update_play_button)
-            self.video_player.video_loaded.connect(self.on_video_loaded)
-            self.video_player.error_occurred.connect(self.show_error)
-
-            # 时间线信号
-            self.timeline.position_changed.connect(self.video_player.seek)
-            self.timeline.annotation_clicked.connect(self.on_annotation_clicked)
+        self.status_bar.showMessage("就绪 - 请选择录制视频或标注现有视频")
 
     def apply_theme(self):
         """应用主题"""
@@ -400,358 +291,59 @@ class VideoAnnotationMainWindow(QMainWindow):
         if state:
             self.restoreState(state)
 
+        # 当前页面
+        current_tab = self.settings.value("currentTab", 0, type=int)
+        if 0 <= current_tab < self.tab_widget.count():
+            self.tab_widget.setCurrentIndex(current_tab)
+
     def save_settings(self):
         """保存设置"""
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("windowState", self.saveState())
+        self.settings.setValue("currentTab", self.tab_widget.currentIndex())
 
-    # === 事件处理方法 ===
+    # === 菜单操作方法 ===
 
-    def open_video(self):
-        """打开视频文件"""
-        try:
-            file_path, _ = QFileDialog.getOpenFileName(
-                self,
-                "选择视频文件",
-                "",
-                "视频文件 (*.mp4 *.avi *.mov *.mkv *.wmv *.flv *.m4v *.webm);;所有文件 (*)"
-            )
+    def open_video_for_annotation(self):
+        """为标注打开视频文件"""
+        # 切换到标注页面
+        self.tab_widget.setCurrentIndex(1)
 
-            if file_path:
-                if self.video_player.load_video(file_path):
-                    self.setup_video_connections()
-                    self.status_bar.showMessage(f"已加载: {os.path.basename(file_path)}")
-                    self.enable_controls()
-                else:
-                    QMessageBox.critical(self, "错误", "视频加载失败")
-        except Exception as e:
-            print(f"打开视频失败: {e}")
-            QMessageBox.critical(self, "错误", f"打开视频失败: {str(e)}")
-
-    def enable_controls(self):
-        """启用控制按钮"""
-        self.play_button.setEnabled(True)
-        self.mark_start_button.setEnabled(True)
-        self.mark_end_button.setEnabled(True)
-
-    def toggle_playback(self):
-        """切换播放/暂停"""
-        if self.video_player:
-            self.video_player.toggle_playback()
-
-    def stop_playback(self):
-        """停止播放"""
-        if self.video_player:
-            self.video_player.stop()
-
-    def update_play_button(self, state):
-        """更新播放按钮"""
-        if state == QMediaPlayer.PlaybackState.PlayingState:
-            self.play_button.setText("暂停")
-        else:
-            self.play_button.setText("播放")
-
-    def update_time_display(self, position: float):
-        """更新时间显示"""
-        if self.video_player:
-            current = TimeUtils.format_time(position)
-            total = TimeUtils.format_time(self.video_player.get_duration())
-            self.time_label.setText(f"{current} / {total}")
-
-    def on_video_loaded(self, video_info: VideoInfo):
-        """视频加载完成"""
-        self.annotation_manager.video_info = video_info
-        self.status_bar.showMessage(f"视频已加载 - 时长: {TimeUtils.format_time(video_info.duration)}")
-
-    def show_error(self, error_msg: str):
-        """显示错误信息"""
-        QMessageBox.critical(self, "错误", error_msg)
-        self.status_bar.showMessage(f"错误: {error_msg}")
-
-    def mark_start(self):
-        """标记起点"""
-        if self.video_player:
-            self.temp_start_time = self.video_player.get_position()
-            self.marking_start = True
-            self.mark_start_button.setText("起点已标记")
-            self.mark_start_button.setEnabled(False)
-            self.status_bar.showMessage(f"起点已标记: {TimeUtils.format_time(self.temp_start_time)}")
-
-    def mark_end(self):
-        """标记终点"""
-        if not self.marking_start:
-            QMessageBox.warning(self, "警告", "请先标记起点")
-            return
-
-        if not self.video_player:
-            return
-
-        end_time = self.video_player.get_position()
-        if end_time <= self.temp_start_time:
-            QMessageBox.warning(self, "警告", "终点时间必须大于起点时间")
-            return
-
-        # 显示标注对话框
-        dialog = AnnotationDialog(self.temp_start_time, end_time, parent=self)
-        if dialog.exec() == AnnotationDialog.DialogCode.Accepted:
-            if dialog.validate_input():
-                annotation = AnnotationMarker(
-                    start_time=self.temp_start_time,
-                    end_time=end_time,
-                    label=dialog.get_label(),
-                    color=dialog.get_color()
-                )
-                self.add_annotation(annotation)
-                self.reset_marking_state()
-
-    def quick_annotation(self, label: str, color: str):
-        """快速标注"""
-        if not self.marking_start:
-            QMessageBox.warning(self, "警告", "请先标记起点")
-            return
-
-        if not self.video_player:
-            return
-
-        end_time = self.video_player.get_position()
-        if end_time <= self.temp_start_time:
-            QMessageBox.warning(self, "警告", "终点时间必须大于起点时间")
-            return
-
-        annotation = AnnotationMarker(
-            start_time=self.temp_start_time,
-            end_time=end_time,
-            label=label,
-            color=color
-        )
-        self.add_annotation(annotation)
-        self.reset_marking_state()
-        self.status_bar.showMessage(f"快速标注已添加: {label}")
-
-    def reset_marking_state(self):
-        """重置标记状态"""
-        self.marking_start = False
-        self.mark_start_button.setText("标记起点")
-        self.mark_start_button.setEnabled(True)
-
-    def add_annotation(self, annotation: AnnotationMarker):
-        """添加标注"""
-        if self.annotation_manager.add_annotation(annotation):
-            self.timeline.add_annotation(annotation)
-            self.update_annotation_list()
-            self.status_bar.showMessage(f"标注已添加: {annotation.label}")
-        else:
-            QMessageBox.warning(self, "警告", "添加标注失败，可能存在时间重叠")
-
-    def update_annotation_list(self):
-        """更新标注列表"""
-        self.annotation_list.clear()
-
-        for i, annotation in enumerate(self.annotation_manager.annotations):
-            item_text = f"{i + 1}. {annotation.label} ({TimeUtils.format_time(annotation.start_time)} - {TimeUtils.format_time(annotation.end_time)})"
-            item = QListWidgetItem(item_text)
-            item.setData(Qt.ItemDataRole.UserRole, annotation)
-
-            # 设置颜色
-            item.setBackground(QColor(annotation.color).lighter(150))
-
-            self.annotation_list.addItem(item)
-
-        # 更新统计
-        stats = self.annotation_manager.get_statistics()
-        self.stats_label.setText(f"总计: {stats['total_count']} 个标注")
-
-    def edit_annotation(self, item: QListWidgetItem):
-        """编辑标注（双击）"""
-        annotation = item.data(Qt.ItemDataRole.UserRole)
-        if annotation and self.video_player:
-            self.video_player.seek(annotation.start_time)
-
-    def edit_selected_annotation(self):
-        """编辑选中的标注"""
-        current_item = self.annotation_list.currentItem()
-        if not current_item:
-            QMessageBox.information(self, "提示", "请选择要编辑的标注")
-            return
-
-        annotation = current_item.data(Qt.ItemDataRole.UserRole)
-        if annotation:
-            dialog = AnnotationDialog(
-                annotation.start_time,
-                annotation.end_time,
-                annotation.label,
-                self
-            )
-            dialog.selected_color = annotation.color
-            dialog.update_color_button()
-
-            if dialog.exec() == AnnotationDialog.DialogCode.Accepted:
-                if dialog.validate_input():
-                    # 更新标注
-                    new_annotation = AnnotationMarker(
-                        start_time=annotation.start_time,
-                        end_time=annotation.end_time,
-                        label=dialog.get_label(),
-                        color=dialog.get_color(),
-                        id=annotation.id
-                    )
-
-                    if self.annotation_manager.update_annotation(annotation, new_annotation):
-                        self.timeline.remove_annotation(annotation)
-                        self.timeline.add_annotation(new_annotation)
-                        self.update_annotation_list()
-                        self.status_bar.showMessage("标注已更新")
-
-    def delete_selected_annotation(self):
-        """删除选中的标注"""
-        current_item = self.annotation_list.currentItem()
-        if not current_item:
-            QMessageBox.information(self, "提示", "请选择要删除的标注")
-            return
-
-        annotation = current_item.data(Qt.ItemDataRole.UserRole)
-        if annotation:
-            reply = QMessageBox.question(
-                self,
-                "确认删除",
-                f"确定要删除标注 '{annotation.label}' 吗？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-
-            if reply == QMessageBox.StandardButton.Yes:
-                if self.annotation_manager.remove_annotation(annotation):
-                    self.timeline.remove_annotation(annotation)
-                    self.update_annotation_list()
-                    self.status_bar.showMessage("标注已删除")
-
-    def clear_all_annotations(self):
-        """清空所有标注"""
-        if not self.annotation_manager.annotations:
-            QMessageBox.information(self, "提示", "没有标注可清空")
-            return
-
-        reply = QMessageBox.question(
-            self,
-            "确认清空",
-            f"确定要删除所有 {len(self.annotation_manager.annotations)} 个标注吗？此操作不可撤销。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-
-        if reply == QMessageBox.StandardButton.Yes:
-            self.annotation_manager.clear_annotations()
-            self.timeline.clear_annotations()
-            self.update_annotation_list()
-            self.status_bar.showMessage("所有标注已清空")
-
-    def on_annotation_clicked(self, annotation: AnnotationMarker):
-        """时间线标注点击"""
-        if self.video_player:
-            self.video_player.seek(annotation.start_time)
+        # 触发标注页面的文件选择
+        if self.annotation_page:
+            self.annotation_page.select_video_file()
 
     def new_project(self):
         """新建项目"""
-        if self.annotation_manager.is_modified:
-            reply = QMessageBox.question(
-                self,
-                "保存更改",
-                "当前项目有未保存的更改，是否保存？",
-                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
-            )
-
-            if reply == QMessageBox.StandardButton.Save:
-                if not self.save_project():
-                    return
-            elif reply == QMessageBox.StandardButton.Cancel:
-                return
-
-        # 清空数据
-        self.annotation_manager = AnnotationManager()
-        self.timeline.clear_annotations()
-        self.update_annotation_list()
-        if self.video_player:
-            self.video_player.stop()
-
-        self.status_bar.showMessage("新项目已创建")
+        if self.annotation_page:
+            self.annotation_page.new_project()
 
     def open_project(self):
         """打开项目"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "打开项目文件",
-            "",
-            "项目文件 (*.json);;所有文件 (*)"
-        )
+        # 切换到标注页面
+        self.tab_widget.setCurrentIndex(1)
 
-        if file_path:
-            if self.annotation_manager.load_project(file_path):
-                # 重新加载界面
-                self.timeline.clear_annotations()
-                for annotation in self.annotation_manager.annotations:
-                    self.timeline.add_annotation(annotation)
-                self.update_annotation_list()
+        if self.annotation_page:
+            self.annotation_page.open_project()
 
-                # 尝试加载视频
-                if self.annotation_manager.video_info.file_path:
-                    if self.video_player.load_video(self.annotation_manager.video_info.file_path):
-                        self.setup_video_connections()
-                        self.enable_controls()
-
-                self.status_bar.showMessage(f"项目已加载: {os.path.basename(file_path)}")
-            else:
-                QMessageBox.critical(self, "错误", "项目加载失败")
-
-    def save_project(self) -> bool:
+    def save_project(self):
         """保存项目"""
-        if not self.annotation_manager.project_file_path:
-            return self.save_project_as()
+        if self.annotation_page:
+            return self.annotation_page.save_project()
+        return False
 
-        if self.annotation_manager.save_project():
-            self.status_bar.showMessage("项目已保存")
-            return True
-        else:
-            QMessageBox.critical(self, "错误", "项目保存失败")
-            return False
-
-    def save_project_as(self) -> bool:
+    def save_project_as(self):
         """另存项目"""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "保存项目",
-            "untitled.json",
-            "项目文件 (*.json);;所有文件 (*)"
-        )
-
-        if file_path:
-            if self.annotation_manager.save_project(file_path):
-                self.status_bar.showMessage(f"项目已保存: {os.path.basename(file_path)}")
-                return True
-            else:
-                QMessageBox.critical(self, "错误", "项目保存失败")
-                return False
+        if self.annotation_page:
+            return self.annotation_page.save_project_as()
         return False
 
     def export_annotations(self):
         """导出标注数据"""
-        if not self.annotation_manager.annotations:
-            QMessageBox.warning(self, "警告", "暂无标注数据可导出")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "导出标注数据",
-            "annotations.json",
-            "JSON文件 (*.json);;所有文件 (*)"
-        )
-
-        if file_path:
-            if self.annotation_manager.export_to_json(file_path):
-                QMessageBox.information(
-                    self,
-                    "导出成功",
-                    f"已导出 {len(self.annotation_manager.annotations)} 条标注到:\n{file_path}"
-                )
-            else:
-                QMessageBox.critical(self, "错误", "导出失败")
+        if self.annotation_page:
+            self.annotation_page.export_annotations()
+        else:
+            QMessageBox.information(self, "提示", "请先切换到标注页面")
 
     def toggle_fullscreen(self):
         """切换全屏"""
@@ -760,30 +352,88 @@ class VideoAnnotationMainWindow(QMainWindow):
         else:
             self.showFullScreen()
 
+    def show_settings(self):
+        """显示设置对话框"""
+        QMessageBox.information(self, "设置", "设置功能正在开发中...")
+
+    def show_user_guide(self):
+        """显示使用指南"""
+        guide_text = """
+AI视频动作标注工具使用指南
+
+【录制页面】
+1. 输入设备IP地址和端口
+2. 点击"连接"按钮连接到视频源
+3. 设置保存路径和录制参数
+4. 点击"开始录制"开始录制视频
+5. 录制完成后可选择自动切换到标注页面
+
+【标注页面】
+1. 选择视频文件或加载录制的视频
+2. 使用播放控制观看视频
+3. 标记起点和终点创建标注区间
+4. 使用快速标注按钮或自定义标签
+5. 管理标注列表，编辑或删除标注
+6. 保存项目或导出标注数据
+
+【快捷键】
+- Ctrl+R: 切换到录制页面
+- Ctrl+A: 切换到标注页面
+- Ctrl+O: 打开视频文件
+- Ctrl+S: 保存项目
+- F11: 全屏模式
+
+【注意事项】
+- WebSocket连接需要确保网络连通性
+- 录制时请确保有足够的存储空间
+- 标注时间区间不能重叠
+"""
+        QMessageBox.information(self, "使用指南", guide_text)
+
     def show_about(self):
         """显示关于信息"""
-        QMessageBox.about(
-            self,
-            "关于",
-            "AI视频动作标注工具\n\n"
-            "版本: 1.0\n"
-            "基于PyQt6开发\n\n"
-            "功能特性:\n"
-            "• 视频播放控制\n"
-            "• 时间线标注\n"
-            "• 快速标注\n"
-            "• 项目管理\n"
-            "• 数据导出"
-        )
+        about_text = """
+AI视频动作标注工具 v2.0
+
+【主要功能】
+📹 实时视频录制
+  • WebSocket视频流接收
+  • 自定义录制参数
+  • 自动文件管理
+
+🎯 智能视频标注
+  • 精确时间线控制
+  • 快速标注预设
+  • 可视化标注管理
+  • 项目保存与导出
+
+【技术特性】
+• 基于PyQt6开发
+• 支持多种视频格式
+• 实时图像处理
+• 响应式用户界面
+
+【开发信息】
+版本: 2.0
+更新: 2024年
+技术栈: Python, PyQt6, OpenCV, WebSocket
+        """
+        QMessageBox.about(self, "关于", about_text)
 
     def closeEvent(self, event):
         """关闭事件"""
-        if self.annotation_manager.is_modified:
+        # 检查标注页面是否有未保存的更改
+        if (self.annotation_page and
+            self.annotation_page.annotation_manager and
+            self.annotation_page.annotation_manager.is_modified):
+
             reply = QMessageBox.question(
                 self,
                 "保存更改",
-                "项目有未保存的更改，是否保存？",
-                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
+                "标注项目有未保存的更改，是否保存？",
+                QMessageBox.StandardButton.Save |
+                QMessageBox.StandardButton.Discard |
+                QMessageBox.StandardButton.Cancel
             )
 
             if reply == QMessageBox.StandardButton.Save:
@@ -793,6 +443,10 @@ class VideoAnnotationMainWindow(QMainWindow):
             elif reply == QMessageBox.StandardButton.Cancel:
                 event.ignore()
                 return
+
+        # 停止录制页面的所有操作
+        if self.recording_page:
+            self.recording_page.close()
 
         # 保存设置
         self.save_settings()
