@@ -4,6 +4,7 @@ image/
 label/
 build/
 dist/
-
+video_annotation_env/
 *.spec
 *.json
+__pycache__/
