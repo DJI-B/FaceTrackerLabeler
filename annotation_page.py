@@ -18,7 +18,7 @@ from annotation_manager import AnnotationManager
 from video_player import VideoPlayerManager
 from widgets.timeline_widget import TimelineWidget
 from widgets.annotation_dialog import AnnotationDialog
-from styles import StyleSheet, ColorPalette
+from styles import StyleSheet, ColorPalette, FacialActionConfig
 from utils import TimeUtils, FileUtils
 
 
@@ -241,21 +241,19 @@ class AnnotationPage(QWidget):
         return group
 
     def create_quick_annotation_group(self) -> QGroupBox:
-        """创建快速标注组"""
-        group = QGroupBox("快速标注")
+        """创建快速标注组 - 面部动作版本"""
+        group = QGroupBox("快速面部动作标注")
         layout = QGridLayout(group)
         layout.setSpacing(8)
 
-        # 快速标注按钮
-        quick_actions = [
-            ("跳跃", ColorPalette.ANNOTATION_COLORS["跳跃"]),
-            ("跑步", ColorPalette.ANNOTATION_COLORS["跑步"]),
-            ("走路", ColorPalette.ANNOTATION_COLORS["走路"]),
-            ("静止", ColorPalette.ANNOTATION_COLORS["静止"])
-        ]
+        # 使用配置中的快速动作
+        quick_actions = FacialActionConfig.QUICK_ACTIONS
 
-        for i, (label, color) in enumerate(quick_actions):
-            btn = QPushButton(label)
+        for i, english_action in enumerate(quick_actions):
+            chinese_action = FacialActionConfig.get_chinese_label(english_action)
+            color = FacialActionConfig.get_label_color(english_action)
+
+            btn = QPushButton(chinese_action)
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {color};
@@ -264,15 +262,16 @@ class AnnotationPage(QWidget):
                     border-radius: 6px;
                     padding: 8px;
                     min-height: 20px;
+                    font-size: 11px;
                 }}
                 QPushButton:hover {{
-                    background-color: {color}DD;
+                    background-color: {QColor(color).lighter(110).name()};
                 }}
                 QPushButton:pressed {{
-                    background-color: {color}BB;
+                    background-color: {QColor(color).darker(110).name()};
                 }}
             """)
-            btn.clicked.connect(lambda checked, l=label, c=color: self.quick_annotation(l, c))
+            btn.clicked.connect(lambda checked, eng=english_action, color=color: self.quick_annotation(eng, color))
             layout.addWidget(btn, i // 2, i % 2)
 
         return group
@@ -402,7 +401,7 @@ class AnnotationPage(QWidget):
             self.mark_start_button.setEnabled(False)
 
     def mark_end(self):
-        """标记终点"""
+        """标记终点 - 面部动作版本"""
         if not self.marking_start:
             QMessageBox.warning(self, "警告", "请先标记起点")
             return
@@ -422,14 +421,16 @@ class AnnotationPage(QWidget):
                 annotation = AnnotationMarker(
                     start_time=self.temp_start_time,
                     end_time=end_time,
-                    label=dialog.get_label(),
+                    label=dialog.get_english_label(),  # 存储英文标签
                     color=dialog.get_color()
                 )
+                # 可以在这里存储强度信息，如果需要的话
+                annotation.intensity = dialog.get_intensity()
                 self.add_annotation(annotation)
                 self.reset_marking_state()
 
-    def quick_annotation(self, label: str, color: str):
-        """快速标注"""
+    def quick_annotation(self, english_label: str, color: str):
+        """快速标注 - 面部动作版本"""
         if not self.marking_start:
             QMessageBox.warning(self, "警告", "请先标记起点")
             return
@@ -442,10 +443,11 @@ class AnnotationPage(QWidget):
             QMessageBox.warning(self, "警告", "终点时间必须大于起点时间")
             return
 
+        # 创建标注，使用英文标签存储
         annotation = AnnotationMarker(
             start_time=self.temp_start_time,
             end_time=end_time,
-            label=label,
+            label=english_label,  # 存储英文标签
             color=color
         )
         self.add_annotation(annotation)
@@ -466,11 +468,13 @@ class AnnotationPage(QWidget):
             QMessageBox.warning(self, "警告", "添加标注失败，可能存在时间重叠")
 
     def update_annotation_list(self):
-        """更新标注列表"""
+        """更新标注列表 - 显示中文但存储英文"""
         self.annotation_list.clear()
 
         for i, annotation in enumerate(self.annotation_manager.annotations):
-            item_text = f"{i + 1}. {annotation.label} ({TimeUtils.format_time(annotation.start_time)} - {TimeUtils.format_time(annotation.end_time)})"
+            # 显示中文标签
+            chinese_label = FacialActionConfig.get_chinese_label(annotation.label)
+            item_text = f"{i + 1}. {chinese_label} ({TimeUtils.format_time(annotation.start_time)} - {TimeUtils.format_time(annotation.end_time)})"
             item = QListWidgetItem(item_text)
             item.setData(Qt.ItemDataRole.UserRole, annotation)
 
@@ -490,7 +494,7 @@ class AnnotationPage(QWidget):
             self.video_player.seek(annotation.start_time)
 
     def edit_selected_annotation(self):
-        """编辑选中的标注"""
+        """编辑选中的标注 - 面部动作版本"""
         current_item = self.annotation_list.currentItem()
         if not current_item:
             QMessageBox.information(self, "提示", "请选择要编辑的标注")
@@ -498,25 +502,32 @@ class AnnotationPage(QWidget):
 
         annotation = current_item.data(Qt.ItemDataRole.UserRole)
         if annotation:
+            # 传递英文标签给对话框
             dialog = AnnotationDialog(
                 annotation.start_time,
                 annotation.end_time,
-                annotation.label,
+                annotation.label,  # 这里是英文标签
                 self
             )
             dialog.selected_color = annotation.color
             dialog.update_color_button()
 
+            # 如果有强度信息，设置强度
+            if hasattr(annotation, 'intensity'):
+                dialog.intensity_slider.setValue(int(annotation.intensity * 100))
+                dialog.intensity_spinbox.setValue(int(annotation.intensity * 100))
+
             if dialog.exec() == AnnotationDialog.DialogCode.Accepted:
                 if dialog.validate_input():
-                    # 更新标注
+                    # 更新标注，存储英文标签
                     new_annotation = AnnotationMarker(
                         start_time=annotation.start_time,
                         end_time=annotation.end_time,
-                        label=dialog.get_label(),
+                        label=dialog.get_english_label(),  # 存储英文标签
                         color=dialog.get_color(),
                         id=annotation.id
                     )
+                    new_annotation.intensity = dialog.get_intensity()
 
                     if self.annotation_manager.update_annotation(annotation, new_annotation):
                         self.timeline.remove_annotation(annotation)
