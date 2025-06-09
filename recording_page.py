@@ -23,10 +23,9 @@ class WebSocketImageReceiver(QThread):
     image_received = pyqtSignal(np.ndarray)
     connection_status_changed = pyqtSignal(bool, str)  # connected, message
 
-    def __init__(self, ip_address, port=8080):
+    def __init__(self, ip_address):
         super().__init__()
         self.ip_address = ip_address
-        self.port = port
         self.ws = None
         self.running = False
         self.frame_count = 0
@@ -51,7 +50,7 @@ class WebSocketImageReceiver(QThread):
             )
 
             self.running = True
-            # 添加ping_interval来保持连接活跃
+            # 添加ping_interval来保持连接活跃3
             self.ws.run_forever(ping_interval=30, ping_timeout=10)
 
         except Exception as e:
@@ -131,15 +130,15 @@ class VideoRecorder:
         self.frame_count = 0
         self.output_path = ""
 
-    def start_recording(self, output_path: str, frame_size: tuple, fps: int = 30):
+    def start_recording(self, output_path: str, frame_size: tuple):
         """开始录制"""
         try:
             self.output_path = output_path
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            self.writer = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
+            self.writer = cv2.VideoWriter(output_path, fourcc, 30, frame_size)
             self.is_recording = True
             self.frame_count = 0
-            print(f"开始录制到: {output_path}, 尺寸: {frame_size}, 帧率: {fps}")
+            print(f"开始录制到: {output_path}, 尺寸: {frame_size}")
             return True
         except Exception as e:
             print(f"开始录制失败: {e}")
@@ -176,13 +175,11 @@ class RecordingPage(QWidget):
 
         # UI组件
         self.ip_input = None
-        self.port_input = None
         self.connect_button = None
         self.video_display = None
         self.status_label = None
         self.record_button = None
         self.save_path_input = None
-        self.fps_input = None
         self.frame_counter = None
         self.recording_time_label = None
 
@@ -232,13 +229,6 @@ class RecordingPage(QWidget):
         self.ip_input.setPlaceholderText("例如: 192.168.31.101")
         layout.addWidget(self.ip_input)
 
-        # 端口输入（实际上对于/ws路径可能不需要）
-        layout.addWidget(QLabel("端口:"))
-        self.port_input = QSpinBox()
-        self.port_input.setRange(1000, 65535)
-        self.port_input.setValue(80)  # ESP32默认HTTP端口
-        layout.addWidget(self.port_input)
-
         # 连接按钮
         self.connect_button = QPushButton("连接")
         self.connect_button.clicked.connect(self.toggle_connection)
@@ -280,13 +270,6 @@ class RecordingPage(QWidget):
 
         # 录制参数
         params_layout = QHBoxLayout()
-
-        params_layout.addWidget(QLabel("帧率:"))
-        self.fps_input = QSpinBox()
-        self.fps_input.setRange(1, 60)
-        self.fps_input.setValue(30)
-        self.fps_input.setSuffix(" fps")
-        params_layout.addWidget(self.fps_input)
 
         params_layout.addStretch()
 
@@ -468,10 +451,9 @@ class RecordingPage(QWidget):
         # 获取帧尺寸
         h, w = self.current_frame.shape[:2]
         frame_size = (w, h)
-        fps = self.fps_input.value()
 
         # 开始录制
-        if self.recorder.start_recording(save_path, frame_size, fps):
+        if self.recorder.start_recording(save_path, frame_size):
             self.record_button.setText("停止录制")
             self.record_button.setStyleSheet(f"QPushButton {{ background-color: {ColorPalette.ERROR}; }}")
 

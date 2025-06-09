@@ -1,5 +1,5 @@
 """
-视频标注页面
+视频标注页面 - 添加数据集导出功能
 """
 import os
 from PyQt6.QtWidgets import (
@@ -216,6 +216,27 @@ class AnnotationPage(QWidget):
         export_button = QPushButton("导出标注")
         export_button.clicked.connect(self.export_annotations)
         layout.addWidget(export_button, 1, 1)
+
+        # 新增：数据集导出按钮
+        dataset_export_button = QPushButton("导出数据集")
+        dataset_export_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ColorPalette.INFO};
+                color: white;
+                font-weight: bold;
+                border-radius: 6px;
+                padding: 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {ColorPalette.INFO}DD;
+            }}
+            QPushButton:pressed {{
+                background-color: {ColorPalette.INFO}BB;
+            }}
+        """)
+        dataset_export_button.setToolTip("将标注片段导出为图像和标注文件数据集")
+        dataset_export_button.clicked.connect(self.export_dataset)
+        layout.addWidget(dataset_export_button, 2, 0, 1, 2)  # 占两列
 
         return group
 
@@ -643,3 +664,29 @@ class AnnotationPage(QWidget):
                 )
             else:
                 QMessageBox.critical(self, "错误", "导出失败")
+
+    def export_dataset(self):
+        """导出数据集 - 使用稳定的简化版"""
+        if not self.annotation_manager.annotations:
+            QMessageBox.warning(self, "警告", "暂无标注数据可导出为数据集")
+            return
+
+        if not self.annotation_manager.video_info.file_path:
+            QMessageBox.warning(self, "警告", "没有关联的视频文件")
+            return
+
+        if not os.path.exists(self.annotation_manager.video_info.file_path):
+            QMessageBox.warning(self, "警告", "视频文件不存在，无法导出数据集")
+            return
+
+        # 使用简化版导出器，避免多线程问题
+        try:
+            from dataset_exporter import simple_export_dataset
+            simple_export_dataset(
+                self,
+                self.annotation_manager.video_info.file_path,
+                self.annotation_manager.annotations,
+                self.annotation_manager.video_info
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"数据集导出失败: {str(e)}")

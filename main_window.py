@@ -193,10 +193,21 @@ class VideoAnnotationMainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        # 导出
+        # 导出菜单
+        export_submenu = file_menu.addMenu("导出")
+
+        # 标注导出
         export_action = QAction("导出标注", self)
+        export_action.setShortcut("Ctrl+E")
         export_action.triggered.connect(self.export_annotations)
-        file_menu.addAction(export_action)
+        export_submenu.addAction(export_action)
+
+        # 新增：数据集导出
+        export_dataset_action = QAction("导出数据集", self)
+        export_dataset_action.setShortcut("Ctrl+Shift+E")
+        export_dataset_action.setToolTip("将标注片段导出为图像和标注文件数据集")
+        export_dataset_action.triggered.connect(self.export_dataset)
+        export_submenu.addAction(export_dataset_action)
 
         file_menu.addSeparator()
 
@@ -231,6 +242,13 @@ class VideoAnnotationMainWindow(QMainWindow):
         about_action = QAction("关于", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
+
+    def export_dataset(self):
+        """导出数据集"""
+        if self.annotation_page:
+            self.annotation_page.export_dataset()
+        else:
+            QMessageBox.information(self, "提示", "请先切换到标注页面")
 
     def create_toolbar(self):
         """创建工具栏"""
@@ -375,18 +393,29 @@ AI视频动作标注工具使用指南
 4. 使用快速标注按钮或自定义标签
 5. 管理标注列表，编辑或删除标注
 6. 保存项目或导出标注数据
+7. 导出数据集：将标注片段导出为图像+标注文件
+
+【数据集导出功能】
+• 自动提取标注片段的每一帧
+• 生成对应的标注文件（TXT格式）
+• 动作进度从0.0到1.0递增
+• 输出到images和labels文件夹
+• 保证文件名唯一性
 
 【快捷键】
 - Ctrl+R: 切换到录制页面
 - Ctrl+A: 切换到标注页面
 - Ctrl+O: 打开视频文件
 - Ctrl+S: 保存项目
+- Ctrl+E: 导出标注
+- Ctrl+Shift+E: 导出数据集
 - F11: 全屏模式
 
 【注意事项】
 - WebSocket连接需要确保网络连通性
 - 录制时请确保有足够的存储空间
 - 标注时间区间不能重叠
+- 数据集导出需要较大存储空间
 """
         QMessageBox.information(self, "使用指南", guide_text)
 
