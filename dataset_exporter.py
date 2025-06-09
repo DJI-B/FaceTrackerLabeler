@@ -1,6 +1,6 @@
 """
-面部动作数据集导出器 - 完整修复版本
-解决中文路径问题和导入问题
+面部动作数据集导出器 - 修复取消逻辑问题
+解决"导出成功也会出现导出被客户取消"的问题
 """
 import os
 import cv2
@@ -53,7 +53,7 @@ def cv2_imwrite_chinese(file_path: str, image: np.ndarray, params=None) -> bool:
 
 
 class FacialActionDatasetExporter:
-    """面部动作数据集导出器 - 修复中文路径版本"""
+    """面部动作数据集导出器 - 修复取消逻辑版本"""
 
     def __init__(self, video_path: str, annotations: List[AnnotationMarker],
                  output_dir: str, fps: float = 30.0):
@@ -61,6 +61,7 @@ class FacialActionDatasetExporter:
         self.annotations = annotations
         self.output_dir = output_dir
         self.fps = fps
+        self.cancelled = False  # 添加取消状态跟踪
 
         # 所有45个动作标签
         self.all_labels = FacialActionConfig.ALL_LABELS
@@ -76,10 +77,14 @@ class FacialActionDatasetExporter:
         }
 
     def export_dataset(self, progress_callback=None) -> bool:
-        """导出数据集 - 修复中文路径问题"""
+        """导出数据集 - 修复取消逻辑"""
         try:
+            self.cancelled = False  # 重置取消状态
+
             if progress_callback:
-                progress_callback(0, "创建输出目录...")
+                if not progress_callback(0, "创建输出目录..."):
+                    self.cancelled = True
+                    return False
 
             # 创建输出目录
             images_dir = Path(self.output_dir) / "images"
@@ -119,15 +124,23 @@ class FacialActionDatasetExporter:
                 total_annotations = len(self.annotations)
 
                 if progress_callback:
-                    progress_callback(5, f"开始处理 {total_annotations} 个标注...")
+                    if not progress_callback(5, f"开始处理 {total_annotations} 个标注..."):
+                        self.cancelled = True
+                        return False
 
                 # 处理每个标注
                 for i, annotation in enumerate(self.annotations):
                     try:
+                        # 检查是否被取消
+                        if self.cancelled:
+                            return False
+
                         if progress_callback:
                             progress = int(5 + (i / total_annotations) * 90)
                             chinese_label = FacialActionConfig.get_chinese_label(annotation.label)
-                            progress_callback(progress, f"处理标注 {i+1}/{total_annotations}: {chinese_label}")
+                            if not progress_callback(progress, f"处理标注 {i+1}/{total_annotations}: {chinese_label}"):
+                                self.cancelled = True
+                                return False
 
                         # 处理刷新UI事件
                         QApplication.processEvents()
@@ -146,14 +159,22 @@ class FacialActionDatasetExporter:
                         print(error_msg)
                         continue
 
+                # 检查是否被取消
+                if self.cancelled:
+                    return False
+
                 # 生成数据集信息文件
                 if progress_callback:
-                    progress_callback(95, "生成数据集信息...")
+                    if not progress_callback(95, "生成数据集信息..."):
+                        self.cancelled = True
+                        return False
 
                 self._generate_dataset_info()
 
                 if progress_callback:
-                    progress_callback(100, "导出完成!")
+                    if not progress_callback(100, "导出完成!"):
+                        self.cancelled = True
+                        return False
 
                 return True
 
@@ -192,6 +213,10 @@ class FacialActionDatasetExporter:
                                  annotation_index: int) -> bool:
         """处理单个标注 - 修复版本"""
         try:
+            # 检查是否被取消
+            if self.cancelled:
+                return False
+
             # 计算帧范围
             start_frame = int(annotation.start_time * video_fps)
             end_frame = int(annotation.end_time * video_fps)
@@ -212,6 +237,10 @@ class FacialActionDatasetExporter:
             # 提取每一帧
             frame_success_count = 0
             for frame_idx in range(total_frames):
+                # 检查是否被取消
+                if self.cancelled:
+                    return False
+
                 current_frame = start_frame + frame_idx
 
                 # 设置帧位置
@@ -253,9 +282,11 @@ class FacialActionDatasetExporter:
                     error_msg = f"保存标注文件失败: {frame_name}"
                     self.stats["errors"].append(error_msg)
 
-                # 处理UI事件，保持界面响应
+                # 处理UI事件，保持界面响应，同时检查取消状态
                 if frame_idx % 10 == 0:
                     QApplication.processEvents()
+                    if self.cancelled:
+                        return False
 
             # 更新标签分布统计
             if annotation.label in self.stats["label_distribution"]:
@@ -273,6 +304,10 @@ class FacialActionDatasetExporter:
     def _save_image_fixed(self, frame, image_path: str, frame_name: str) -> bool:
         """保存图像 - 修复版本"""
         try:
+            # 检查是否被取消
+            if self.cancelled:
+                return False
+
             # 验证输入帧
             if frame is None or frame.size == 0:
                 self.stats["debug_info"].append(f"无效帧数据: {frame_name}")
@@ -351,6 +386,10 @@ class FacialActionDatasetExporter:
                                      intensity: float, action_progress: float) -> bool:
         """保存面部动作标注文件 - 45个浮点数格式"""
         try:
+            # 检查是否被取消
+            if self.cancelled:
+                return False
+
             # 创建45个动作的数值数组
             action_values = [0.0] * 45
 
@@ -396,6 +435,10 @@ class FacialActionDatasetExporter:
     def _generate_dataset_info(self):
         """生成数据集信息文件"""
         try:
+            # 检查是否被取消
+            if self.cancelled:
+                return
+
             info_path = Path(self.output_dir) / "dataset_info.json"
 
             # 创建标签映射信息
@@ -427,6 +470,7 @@ class FacialActionDatasetExporter:
                 },
                 "statistics": self.stats,
                 "tongue_actions": FacialActionConfig.TONGUE_ACTIONS,
+                "export_status": "cancelled" if self.cancelled else "completed",
                 "debug_information": {
                     "opencv_version": cv2.__version__,
                     "debug_messages": self.stats["debug_info"],
@@ -442,9 +486,13 @@ class FacialActionDatasetExporter:
             self.stats["errors"].append(error_msg)
             print(error_msg)
 
+    def cancel_export(self):
+        """取消导出"""
+        self.cancelled = True
+
 
 class SimpleProgressDialog(QDialog):
-    """简单进度对话框 - 增加调试信息显示"""
+    """简单进度对话框 - 修复取消逻辑"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -479,15 +527,23 @@ class SimpleProgressDialog(QDialog):
         button_layout.addStretch()
 
         self.cancel_button = QPushButton("取消")
-        self.cancel_button.clicked.connect(self.reject)
+        self.cancel_button.clicked.connect(self.cancel_export)
         button_layout.addWidget(self.cancel_button)
 
         layout.addLayout(button_layout)
 
         self.cancelled = False
+        self.exporter = None  # 将在导出时设置
 
-    def update_progress(self, value: int, message: str):
-        """更新进度"""
+    def set_exporter(self, exporter):
+        """设置导出器引用"""
+        self.exporter = exporter
+
+    def update_progress(self, value: int, message: str) -> bool:
+        """更新进度 - 返回是否继续"""
+        if self.cancelled:
+            return False
+
         self.progress_bar.setValue(value)
         self.status_label.setText(message)
         
@@ -496,16 +552,29 @@ class SimpleProgressDialog(QDialog):
         self.debug_text.ensureCursorVisible()
         
         QApplication.processEvents()
+        
+        # 检查是否在processEvents期间被取消
+        return not self.cancelled
 
-    def reject(self):
-        """取消对话框"""
+    def cancel_export(self):
+        """取消导出"""
         self.cancelled = True
-        super().reject()
+        if self.exporter:
+            self.exporter.cancel_export()
+        self.cancel_button.setText("取消中...")
+        self.cancel_button.setEnabled(False)
+        self.status_label.setText("正在取消导出...")
+
+    def closeEvent(self, event):
+        """关闭事件"""
+        if not self.cancelled:
+            self.cancel_export()
+        event.accept()
 
 
 def simple_export_dataset(parent, video_path: str, annotations: List[AnnotationMarker],
                          video_info: VideoInfo) -> bool:
-    """面部动作数据集导出入口函数 - 修复版本"""
+    """面部动作数据集导出入口函数 - 修复取消逻辑版本"""
     try:
         # 基本验证
         if not annotations:
@@ -535,6 +604,7 @@ def simple_export_dataset(parent, video_path: str, annotations: List[AnnotationM
 • 使用cv2.imencode避免路径编码问题  
 • 优化文件名生成，避免特殊字符
 • 增强错误处理和调试信息
+• 修复取消逻辑，避免误报取消成功
 
 建议：选择英文路径作为输出目录以获得最佳兼容性
 
@@ -579,8 +649,7 @@ def simple_export_dataset(parent, video_path: str, annotations: List[AnnotationM
 
         # 创建进度对话框
         progress_dialog = SimpleProgressDialog(parent)
-        progress_dialog.show()
-
+        
         # 创建导出器
         exporter = FacialActionDatasetExporter(
             video_path,
@@ -588,20 +657,28 @@ def simple_export_dataset(parent, video_path: str, annotations: List[AnnotationM
             output_dir,
             video_info.fps
         )
+        
+        # 设置导出器引用到对话框
+        progress_dialog.set_exporter(exporter)
+        progress_dialog.show()
 
         # 执行导出
         def progress_callback(value, message):
-            if progress_dialog.cancelled:
-                return False
-            progress_dialog.update_progress(value, message)
-            return True
+            """进度回调函数 - 返回是否继续"""
+            return progress_dialog.update_progress(value, message)
 
         success = exporter.export_dataset(progress_callback)
 
+        # 关闭进度对话框
         progress_dialog.close()
 
-        if success and not progress_dialog.cancelled:
-            # 显示详细结果
+        # 根据结果显示不同消息
+        if progress_dialog.cancelled or exporter.cancelled:
+            # 用户主动取消
+            QMessageBox.information(parent, "已取消", "导出已被用户取消")
+            return False
+        elif success:
+            # 导出成功
             stats = exporter.stats
             
             result_msg = f"""面部动作数据集导出完成！
@@ -625,12 +702,9 @@ def simple_export_dataset(parent, video_path: str, annotations: List[AnnotationM
 
             QMessageBox.information(parent, "导出成功", result_msg)
             return True
-        elif progress_dialog.cancelled:
-            QMessageBox.information(parent, "已取消", "导出已被用户取消")
-            return False
         else:
-            # 显示详细错误信息
-            error_details = "\n".join(exporter.stats['errors'][-5:])
+            # 导出失败（非取消原因）
+            error_details = "\n".join(exporter.stats['errors'][-5:]) if exporter.stats['errors'] else "未知错误"
             detailed_msg = f"""导出过程中出现错误:
 
 {error_details}

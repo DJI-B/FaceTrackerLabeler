@@ -1,11 +1,15 @@
 """
-视频标注页面 - 移除JSON导出功能
+视频标注页面 - 修复版本
+1. 添加逐帧观看功能
+2. 允许起点修改
+3. 导出后自动清空标注列表
+4. 修复导出成功消息问题
 """
 import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QGroupBox, QFrame,
     QPushButton, QLabel, QListWidget, QListWidgetItem, QFileDialog,
-    QMessageBox, QGridLayout
+    QMessageBox, QGridLayout, QSpinBox
 )
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QAction, QKeySequence, QColor
@@ -23,7 +27,7 @@ from utils import TimeUtils, FileUtils
 
 
 class AnnotationPage(QWidget):
-    """视频标注页面"""
+    """视频标注页面 - 增强版本"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -41,6 +45,11 @@ class AnnotationPage(QWidget):
         self.stats_label = None
         self.mark_start_button = None
         self.mark_end_button = None
+        
+        # 新增逐帧控制组件
+        self.frame_step_spinbox = None
+        self.prev_frame_button = None
+        self.next_frame_button = None
 
         # 状态
         self.marking_start = False
@@ -94,6 +103,10 @@ class AnnotationPage(QWidget):
         # 播放控制
         controls = self.create_playback_controls()
         layout.addWidget(controls)
+
+        # 逐帧控制区域（新增）
+        frame_controls = self.create_frame_controls()
+        layout.addWidget(frame_controls)
 
         # 时间线组
         timeline_group = QGroupBox("时间线控制")
@@ -167,6 +180,45 @@ class AnnotationPage(QWidget):
         self.mark_end_button.clicked.connect(self.mark_end)
 
         return widget
+
+    def create_frame_controls(self) -> QGroupBox:
+        """创建逐帧控制区域（新增功能）"""
+        group = QGroupBox("逐帧控制")
+        layout = QHBoxLayout(group)
+
+        # 步长设置
+        layout.addWidget(QLabel("步长:"))
+        self.frame_step_spinbox = QSpinBox()
+        self.frame_step_spinbox.setRange(1, 30)
+        self.frame_step_spinbox.setValue(1)
+        self.frame_step_spinbox.setSuffix(" 帧")
+        self.frame_step_spinbox.setToolTip("设置每次跳跃的帧数")
+        layout.addWidget(self.frame_step_spinbox)
+
+        layout.addStretch()
+
+        # 上一帧按钮
+        self.prev_frame_button = QPushButton("◀◀ 后退")
+        self.prev_frame_button.setEnabled(False)
+        self.prev_frame_button.clicked.connect(self.prev_frame)
+        self.prev_frame_button.setToolTip("后退指定帧数 (快捷键: A)")
+        layout.addWidget(self.prev_frame_button)
+
+        # 下一帧按钮
+        self.next_frame_button = QPushButton("前进 ▶▶")
+        self.next_frame_button.setEnabled(False)
+        self.next_frame_button.clicked.connect(self.next_frame)
+        self.next_frame_button.setToolTip("前进指定帧数 (快捷键: D)")
+        layout.addWidget(self.next_frame_button)
+
+        # 精确跳转
+        precise_button = QPushButton("精确定位")
+        precise_button.setEnabled(False)
+        precise_button.clicked.connect(self.precise_seek)
+        precise_button.setToolTip("输入确切时间跳转")
+        layout.addWidget(precise_button)
+
+        return group
 
     def create_control_panel(self) -> QWidget:
         """创建右侧控制面板"""
@@ -307,8 +359,25 @@ class AnnotationPage(QWidget):
 
     def setup_connections(self):
         """设置信号连接"""
-        # 视频连接将在加载视频后设置
-        pass
+        # 设置键盘快捷键
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def keyPressEvent(self, event):
+        """键盘事件处理 - 添加快捷键支持"""
+        if event.key() == Qt.Key.Key_A:  # A键 - 后退
+            self.prev_frame()
+        elif event.key() == Qt.Key.Key_D:  # D键 - 前进
+            self.next_frame()
+        elif event.key() == Qt.Key.Key_Space:  # 空格键 - 播放/暂停
+            self.toggle_playback()
+        elif event.key() == Qt.Key.Key_S:  # S键 - 标记起点
+            if self.mark_start_button.isEnabled():
+                self.mark_start()
+        elif event.key() == Qt.Key.Key_E:  # E键 - 标记终点
+            if self.mark_end_button.isEnabled():
+                self.mark_end()
+        else:
+            super().keyPressEvent(event)
 
     def setup_video_connections(self):
         """设置视频相关连接"""
@@ -359,6 +428,9 @@ class AnnotationPage(QWidget):
         self.play_button.setEnabled(True)
         self.mark_start_button.setEnabled(True)
         self.mark_end_button.setEnabled(True)
+        # 启用逐帧控制
+        self.prev_frame_button.setEnabled(True)
+        self.next_frame_button.setEnabled(True)
 
     def toggle_playback(self):
         """切换播放/暂停"""
@@ -369,6 +441,49 @@ class AnnotationPage(QWidget):
         """停止播放"""
         if self.video_player:
             self.video_player.stop()
+
+    def prev_frame(self):
+        """后退指定帧数"""
+        if self.video_player:
+            step_frames = self.frame_step_spinbox.value()
+            fps = self.video_player.video_info.fps or 30.0
+            step_time = step_frames / fps
+            current_pos = self.video_player.get_position()
+            new_pos = max(0, current_pos - step_time)
+            self.video_player.seek(new_pos)
+
+    def next_frame(self):
+        """前进指定帧数"""
+        if self.video_player:
+            step_frames = self.frame_step_spinbox.value()
+            fps = self.video_player.video_info.fps or 30.0
+            step_time = step_frames / fps
+            current_pos = self.video_player.get_position()
+            duration = self.video_player.get_duration()
+            new_pos = min(duration, current_pos + step_time)
+            self.video_player.seek(new_pos)
+
+    def precise_seek(self):
+        """精确跳转到指定时间"""
+        if not self.video_player:
+            return
+        
+        from PyQt6.QtWidgets import QInputDialog
+        current_time = TimeUtils.format_time(self.video_player.get_position())
+        time_str, ok = QInputDialog.getText(
+            self, 
+            "精确定位", 
+            f"输入目标时间 (格式: MM:SS)\n当前时间: {current_time}",
+            text=current_time
+        )
+        
+        if ok and time_str:
+            target_time = TimeUtils.parse_time(time_str)
+            duration = self.video_player.get_duration()
+            if 0 <= target_time <= duration:
+                self.video_player.seek(target_time)
+            else:
+                QMessageBox.warning(self, "警告", f"时间超出范围 (0 - {TimeUtils.format_time(duration)})")
 
     def update_play_button(self, state):
         """更新播放按钮"""
@@ -393,12 +508,18 @@ class AnnotationPage(QWidget):
         QMessageBox.critical(self, "错误", error_msg)
 
     def mark_start(self):
-        """标记起点"""
+        """标记起点 - 支持重新标记"""
         if self.video_player:
             self.temp_start_time = self.video_player.get_position()
             self.marking_start = True
-            self.mark_start_button.setText("起点已标记")
-            self.mark_start_button.setEnabled(False)
+            
+            # 改变按钮状态，但保持启用以允许重新标记
+            self.mark_start_button.setText(f"起点: {TimeUtils.format_time(self.temp_start_time)}")
+            self.mark_start_button.setStyleSheet(f"QPushButton {{ background-color: {ColorPalette.WARNING}; }}")
+            
+            # 显示提示信息
+            QMessageBox.information(self, "起点已标记", 
+                f"起点时间: {TimeUtils.format_time(self.temp_start_time)}\n\n可以重新点击'标记起点'来修改起点位置")
 
     def mark_end(self):
         """标记终点 - 面部动作版本"""
@@ -424,7 +545,7 @@ class AnnotationPage(QWidget):
                     label=dialog.get_english_label(),  # 存储英文标签
                     color=dialog.get_color()
                 )
-                # 可以在这里存储强度信息，如果需要的话
+                # 存储强度信息
                 annotation.intensity = dialog.get_intensity()
                 self.add_annotation(annotation)
                 self.reset_marking_state()
@@ -457,7 +578,7 @@ class AnnotationPage(QWidget):
         """重置标记状态"""
         self.marking_start = False
         self.mark_start_button.setText("标记起点")
-        self.mark_start_button.setEnabled(True)
+        self.mark_start_button.setStyleSheet(f"QPushButton {{ background-color: {ColorPalette.SUCCESS}; }}")
 
     def add_annotation(self, annotation: AnnotationMarker):
         """添加标注"""
@@ -654,7 +775,7 @@ class AnnotationPage(QWidget):
         return False
 
     def export_dataset(self):
-        """导出数据集 - 使用稳定的简化版"""
+        """导出数据集 - 修复版本，导出后询问是否清空标注"""
         if not self.annotation_manager.annotations:
             QMessageBox.warning(self, "警告", "暂无标注数据可导出为数据集")
             return
@@ -667,14 +788,42 @@ class AnnotationPage(QWidget):
             QMessageBox.warning(self, "警告", "视频文件不存在，无法导出数据集")
             return
 
-        # 使用简化版导出器，避免多线程问题
+        # 使用修复版导出器
         try:
             from dataset_exporter import simple_export_dataset
-            simple_export_dataset(
+            
+            # 执行导出
+            export_success = simple_export_dataset(
                 self,
                 self.annotation_manager.video_info.file_path,
                 self.annotation_manager.annotations,
                 self.annotation_manager.video_info
             )
+            
+            # 修复：只有真正导出成功时才处理后续操作
+            if export_success:
+                # 询问是否清空已导出的标注
+                reply = QMessageBox.question(
+                    self,
+                    "导出成功",
+                    "数据集导出成功！\n\n是否清空当前标注列表？\n(避免重复导出同一份数据)",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes  # 默认选择Yes
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    # 清空标注但不清空项目设置
+                    self.annotation_manager.clear_annotations()
+                    self.timeline.clear_annotations()
+                    self.update_annotation_list()
+                    
+                    # 显示清空确认
+                    QMessageBox.information(
+                        self, 
+                        "标注已清空", 
+                        "标注列表已清空，可以继续添加新的标注。\n项目设置和视频文件保持不变。"
+                    )
+            # 如果导出失败，simple_export_dataset 内部已经显示了错误消息
+            
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"数据集导出失败: {str(e)}")
+            QMessageBox.critical(self, "导出错误", f"数据集导出失败: {str(e)}")
