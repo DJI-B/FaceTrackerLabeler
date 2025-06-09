@@ -1,5 +1,5 @@
 """
-主应用程序窗口 - 支持视频录制和标注两个页面
+主应用程序窗口 - 支持视频录制和标注两个页面（移除JSON导出功能）
 """
 import sys
 import os
@@ -193,21 +193,12 @@ class VideoAnnotationMainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        # 导出菜单
-        export_submenu = file_menu.addMenu("导出")
-
-        # 标注导出
-        export_action = QAction("导出标注", self)
-        export_action.setShortcut("Ctrl+E")
-        export_action.triggered.connect(self.export_annotations)
-        export_submenu.addAction(export_action)
-
-        # 新增：数据集导出
+        # 数据集导出
         export_dataset_action = QAction("导出数据集", self)
         export_dataset_action.setShortcut("Ctrl+Shift+E")
         export_dataset_action.setToolTip("将标注片段导出为图像和标注文件数据集")
         export_dataset_action.triggered.connect(self.export_dataset)
-        export_submenu.addAction(export_dataset_action)
+        file_menu.addAction(export_dataset_action)
 
         file_menu.addSeparator()
 
@@ -281,11 +272,11 @@ class VideoAnnotationMainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        # 导出
-        export_action = QAction("导出", self)
-        export_action.setToolTip("导出标注数据")
-        export_action.triggered.connect(self.export_annotations)
-        toolbar.addAction(export_action)
+        # 数据集导出
+        dataset_action = QAction("导出数据集", self)
+        dataset_action.setToolTip("导出数据集")
+        dataset_action.triggered.connect(self.export_dataset)
+        toolbar.addAction(dataset_action)
 
     def create_status_bar(self):
         """创建状态栏"""
@@ -356,13 +347,6 @@ class VideoAnnotationMainWindow(QMainWindow):
             return self.annotation_page.save_project_as()
         return False
 
-    def export_annotations(self):
-        """导出标注数据"""
-        if self.annotation_page:
-            self.annotation_page.export_annotations()
-        else:
-            QMessageBox.information(self, "提示", "请先切换到标注页面")
-
     def toggle_fullscreen(self):
         """切换全屏"""
         if self.isFullScreen():
@@ -392,8 +376,7 @@ AI视频动作标注工具使用指南
 3. 标记起点和终点创建标注区间
 4. 使用快速标注按钮或自定义标签
 5. 管理标注列表，编辑或删除标注
-6. 保存项目或导出标注数据
-7. 导出数据集：将标注片段导出为图像+标注文件
+6. 保存项目或导出数据集
 
 【数据集导出功能】
 • 自动提取标注片段的每一帧
@@ -407,7 +390,6 @@ AI视频动作标注工具使用指南
 - Ctrl+A: 切换到标注页面
 - Ctrl+O: 打开视频文件
 - Ctrl+S: 保存项目
-- Ctrl+E: 导出标注
 - Ctrl+Shift+E: 导出数据集
 - F11: 全屏模式
 
@@ -434,7 +416,8 @@ AI视频动作标注工具 v2.0
   • 精确时间线控制
   • 快速标注预设
   • 可视化标注管理
-  • 项目保存与导出
+  • 项目保存与加载
+  • 数据集导出
 
 【技术特性】
 • 基于PyQt6开发

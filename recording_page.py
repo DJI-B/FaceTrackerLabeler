@@ -28,8 +28,6 @@ class WebSocketImageReceiver(QThread):
         self.ip_address = ip_address
         self.ws = None
         self.running = False
-        self.frame_count = 0
-        self.total_bytes_received = 0
 
     def run(self):
         """运行WebSocket连接"""
@@ -79,16 +77,12 @@ class WebSocketImageReceiver(QThread):
                 image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
                 if image is not None:
-                    self.frame_count += 1
-                    if self.frame_count % 30 == 0:  # 每30帧打印一次统计
-                        print(f"已接收 {self.frame_count} 帧，总字节数: {self.total_bytes_received}")
-
                     self.image_received.emit(image)
                 else:
                     print("图像解码失败")
             else:
                 # 文本消息
-                print(f"收到文本消息: {message}")
+                pass
 
         except Exception as e:
             print(f"解析图像失败: {e}")

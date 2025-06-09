@@ -1,5 +1,5 @@
 """
-视频标注页面 - 添加数据集导出功能
+视频标注页面 - 移除JSON导出功能
 """
 import os
 from PyQt6.QtWidgets import (
@@ -213,11 +213,11 @@ class AnnotationPage(QWidget):
         save_button.clicked.connect(self.save_project)
         layout.addWidget(save_button, 1, 0)
 
-        export_button = QPushButton("导出标注")
-        export_button.clicked.connect(self.export_annotations)
-        layout.addWidget(export_button, 1, 1)
+        save_as_button = QPushButton("另存为...")
+        save_as_button.clicked.connect(self.save_project_as)
+        layout.addWidget(save_as_button, 1, 1)
 
-        # 新增：数据集导出按钮
+        # 数据集导出按钮
         dataset_export_button = QPushButton("导出数据集")
         dataset_export_button.setStyleSheet(f"""
             QPushButton {{
@@ -641,29 +641,6 @@ class AnnotationPage(QWidget):
                 QMessageBox.critical(self, "错误", "项目保存失败")
                 return False
         return False
-
-    def export_annotations(self):
-        """导出标注数据"""
-        if not self.annotation_manager.annotations:
-            QMessageBox.warning(self, "警告", "暂无标注数据可导出")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "导出标注数据",
-            "annotations.json",
-            "JSON文件 (*.json);;所有文件 (*)"
-        )
-
-        if file_path:
-            if self.annotation_manager.export_to_json(file_path):
-                QMessageBox.information(
-                    self,
-                    "导出成功",
-                    f"已导出 {len(self.annotation_manager.annotations)} 条标注到:\n{file_path}"
-                )
-            else:
-                QMessageBox.critical(self, "错误", "导出失败")
 
     def export_dataset(self):
         """导出数据集 - 使用稳定的简化版"""
