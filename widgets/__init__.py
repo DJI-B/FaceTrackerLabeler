@@ -1,6 +1,7 @@
 try:
     from .timeline_widget import TimelineWidget
     from .annotation_dialog import AnnotationDialog
+    from .roi_video_widget import ROIVideoWidget
 except ImportError as e:
     print(f"控件导入失败: {e}")
     # 提供备用方案
@@ -11,6 +12,7 @@ except ImportError as e:
 __all__ = [
     "TimelineWidget",
     "AnnotationDialog",
+    "ROIVideoWidget",
     # 可以添加更多控件
 ]
 

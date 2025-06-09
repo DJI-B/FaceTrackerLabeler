@@ -1,5 +1,5 @@
 """
-视频录制页面 - 修复WebSocket连接问题
+视频录制页面 - 支持ROI选择功能
 """
 import cv2
 import asyncio
@@ -10,11 +10,11 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QGroupBox, QTextEdit, QFileDialog, QMessageBox,
-    QProgressBar, QSpinBox
+    QProgressBar, QSpinBox, QCheckBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, pyqtSlot
-from PyQt6.QtGui import QPixmap, QImage
 from styles import StyleSheet, ColorPalette
+from widgets import ROIVideoWidget
 
 
 class WebSocketImageReceiver(QThread):
@@ -155,7 +155,7 @@ class VideoRecorder:
 
 
 class RecordingPage(QWidget):
-    """视频录制页面"""
+    """视频录制页面 - 支持ROI功能"""
 
     # 信号定义
     recording_completed = pyqtSignal(str)  # 录制完成，传递视频文件路径
@@ -170,17 +170,25 @@ class RecordingPage(QWidget):
         # UI组件
         self.ip_input = None
         self.connect_button = None
-        self.video_display = None
+        self.video_display = None  # 这将是ROIVideoWidget
         self.status_label = None
         self.record_button = None
         self.save_path_input = None
         self.frame_counter = None
         self.recording_time_label = None
 
+        # ROI相关UI组件
+        self.roi_enabled_checkbox = None
+        self.roi_reset_button = None
+        self.roi_info_label = None
+
         # 状态
         self.is_connected = False
         self.current_frame = None
         self.recording_start_time = None
+
+        # ROI相关状态
+        self.roi_rect = None  # 原始图像坐标系中的ROI
 
         # 定时器
         self.recording_timer = QTimer()
@@ -204,6 +212,10 @@ class RecordingPage(QWidget):
         # 视频显示区域
         display_group = self.create_display_group()
         layout.addWidget(display_group)
+
+        # ROI控制组
+        roi_group = self.create_roi_group()
+        layout.addWidget(roi_group)
 
         # 录制控制组
         recording_group = self.create_recording_group()
@@ -238,13 +250,40 @@ class RecordingPage(QWidget):
         group = QGroupBox("视频预览")
         layout = QVBoxLayout(group)
 
-        # 视频显示标签
-        self.video_display = QLabel()
-        self.video_display.setMinimumSize(640, 480)
-        self.video_display.setStyleSheet("border: 2px solid #555; background-color: black;")
-        self.video_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.video_display.setText("等待连接...")
+        # 使用支持ROI的视频显示控件
+        self.video_display = ROIVideoWidget()
+        self.video_display.roi_changed.connect(self.on_roi_changed)
         layout.addWidget(self.video_display)
+
+        return group
+
+    def create_roi_group(self) -> QGroupBox:
+        """创建ROI控制组"""
+        group = QGroupBox("感兴趣区域 (ROI)")
+        layout = QHBoxLayout(group)
+
+        # ROI启用复选框
+        self.roi_enabled_checkbox = QCheckBox("启用ROI选择")
+        self.roi_enabled_checkbox.toggled.connect(self.on_roi_enabled_changed)
+        layout.addWidget(self.roi_enabled_checkbox)
+
+        # ROI重置按钮
+        self.roi_reset_button = QPushButton("重置ROI")
+        self.roi_reset_button.setEnabled(False)
+        self.roi_reset_button.clicked.connect(self.reset_roi)
+        layout.addWidget(self.roi_reset_button)
+
+        # ROI信息显示
+        self.roi_info_label = QLabel("ROI: 未设置")
+        self.roi_info_label.setStyleSheet("color: #999; font-size: 11px;")
+        layout.addWidget(self.roi_info_label)
+
+        layout.addStretch()
+
+        # 使用说明
+        help_label = QLabel("💡 启用后可用鼠标拖拽选择录制区域")
+        help_label.setStyleSheet("color: #0078d4; font-size: 10px;")
+        layout.addWidget(help_label)
 
         return group
 
@@ -355,18 +394,31 @@ class RecordingPage(QWidget):
         self.status_label.setText("已断开连接")
         self.video_display.setText("等待连接...")
 
+        # 重新启用ROI控件
+        self.roi_enabled_checkbox.setEnabled(True)
+        if self.roi_enabled_checkbox.isChecked():
+            self.roi_reset_button.setEnabled(True)
+
     @pyqtSlot(np.ndarray)
     def on_image_received(self, image):
         """接收到图像"""
         self.current_frame = image.copy()
 
-        # 显示图像
-        self.display_image(image)
+        # 更新显示
+        self.video_display.update_image(image)
 
-        # 如果正在录制，写入帧
+        # 如果正在录制，处理并写入帧
         if self.recorder.is_recording:
-            self.recorder.write_frame(image)
+            # 获取要保存的图像（可能经过ROI裁剪）
+            frame_to_save = self.get_frame_for_recording(image)
+            self.recorder.write_frame(frame_to_save)
             self.frame_counter.setText(f"帧数: {self.recorder.frame_count}")
+
+    def get_frame_for_recording(self, image: np.ndarray) -> np.ndarray:
+        """获取用于录制的帧（应用ROI裁剪）"""
+        if self.video_display.has_valid_roi():
+            return self.video_display.get_cropped_image(image)
+        return image
 
     @pyqtSlot(bool, str)
     def on_connection_status_changed(self, connected, message):
@@ -387,39 +439,37 @@ class RecordingPage(QWidget):
 
         self.connect_button.setEnabled(True)
 
-    def display_image(self, image):
-        """显示图像"""
-        try:
-            # 转换为RGB格式
-            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            h, w, ch = rgb_image.shape
+    def on_roi_enabled_changed(self, enabled: bool):
+        """ROI启用状态改变"""
+        self.video_display.set_roi_enabled(enabled)
+        self.roi_reset_button.setEnabled(enabled)
 
-            # 缩放以适应显示区域
-            display_size = self.video_display.size()
-            if display_size.width() > 0 and display_size.height() > 0:
-                aspect_ratio = w / h
-                display_aspect = display_size.width() / display_size.height()
+        if enabled:
+            self.video_display.set_cursor_for_roi()
+            self.status_label.setText("ROI模式已启用 - 拖拽鼠标选择录制区域")
+        else:
+            self.video_display.reset_roi()
+            self.roi_info_label.setText("ROI: 未设置")
+            self.status_label.setText("ROI模式已禁用")
 
-                if aspect_ratio > display_aspect:
-                    new_w = display_size.width()
-                    new_h = int(new_w / aspect_ratio)
-                else:
-                    new_h = display_size.height()
-                    new_w = int(new_h * aspect_ratio)
+    def on_roi_changed(self, roi_rect):
+        """ROI区域改变"""
+        from PyQt6.QtCore import QRect
 
-                rgb_image = cv2.resize(rgb_image, (new_w, new_h))
+        if roi_rect.isEmpty():
+            self.roi_info_label.setText("ROI: 未设置")
+            self.roi_rect = None
+        else:
+            self.roi_rect = roi_rect
+            self.roi_info_label.setText(f"ROI: {roi_rect.width()}×{roi_rect.height()} (x:{roi_rect.x()}, y:{roi_rect.y()})")
+            self.status_label.setText("ROI已设置 - 录制时将使用此区域")
 
-            # 转换为QImage
-            bytes_per_line = ch * rgb_image.shape[1]
-            qt_image = QImage(rgb_image.data, rgb_image.shape[1], rgb_image.shape[0],
-                            bytes_per_line, QImage.Format.Format_RGB888)
-
-            # 显示
-            pixmap = QPixmap.fromImage(qt_image)
-            self.video_display.setPixmap(pixmap)
-
-        except Exception as e:
-            print(f"显示图像失败: {e}")
+    def reset_roi(self):
+        """重置ROI"""
+        self.video_display.reset_roi()
+        self.roi_info_label.setText("ROI: 未设置")
+        self.roi_rect = None
+        self.status_label.setText("ROI已重置")
 
     def browse_save_path(self):
         """浏览保存路径"""
@@ -463,9 +513,15 @@ class RecordingPage(QWidget):
             QMessageBox.warning(self, "警告", "请设置保存路径")
             return
 
-        # 获取帧尺寸
-        h, w = self.current_frame.shape[:2]
+        # 获取用于录制的帧（可能经过ROI裁剪）
+        frame_for_recording = self.get_frame_for_recording(self.current_frame)
+        h, w = frame_for_recording.shape[:2]
         frame_size = (w, h)
+
+        # 检查ROI裁剪后的尺寸是否合理
+        if w < 10 or h < 10:
+            QMessageBox.warning(self, "警告", "ROI区域太小，无法录制。请调整ROI区域或禁用ROI。")
+            return
 
         # 开始录制
         if self.recorder.start_recording(save_path, frame_size):
@@ -476,7 +532,17 @@ class RecordingPage(QWidget):
             self.recording_start_time = datetime.now()
             self.recording_timer.start(1000)  # 每秒更新一次
 
-            self.status_label.setText("正在录制...")
+            # 显示录制信息
+            roi_info = ""
+            if self.video_display.has_valid_roi():
+                roi_rect = self.video_display.get_original_roi()
+                roi_info = f" (ROI: {roi_rect.width()}×{roi_rect.height()})"
+
+            self.status_label.setText(f"正在录制{roi_info}...")
+
+            # 禁用ROI相关控件，防止录制时修改
+            self.roi_enabled_checkbox.setEnabled(False)
+            self.roi_reset_button.setEnabled(False)
         else:
             QMessageBox.critical(self, "错误", "开始录制失败")
 
@@ -490,14 +556,25 @@ class RecordingPage(QWidget):
         # 停止计时
         self.recording_timer.stop()
 
+        # 重新启用ROI控件
+        self.roi_enabled_checkbox.setEnabled(True)
+        if self.roi_enabled_checkbox.isChecked():
+            self.roi_reset_button.setEnabled(True)
+
         if frame_count > 0:
-            self.status_label.setText(f"录制完成 - 共 {frame_count} 帧")
+            # 显示录制完成信息
+            roi_info = ""
+            if self.video_display.has_valid_roi():
+                roi_rect = self.video_display.get_original_roi()
+                roi_info = f" (ROI区域: {roi_rect.width()}×{roi_rect.height()})"
+
+            self.status_label.setText(f"录制完成 - 共 {frame_count} 帧{roi_info}")
 
             # 询问是否打开标注页面
             reply = QMessageBox.question(
                 self,
                 "录制完成",
-                f"录制完成！\n文件保存到: {output_path}\n共录制 {frame_count} 帧\n\n是否切换到标注页面？",
+                f"录制完成！\n文件保存到: {output_path}\n共录制 {frame_count} 帧{roi_info}\n\n是否切换到标注页面？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
 
