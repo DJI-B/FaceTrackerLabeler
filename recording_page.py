@@ -10,7 +10,7 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QGroupBox, QTextEdit, QFileDialog, QMessageBox,
-    QProgressBar, QSpinBox, QCheckBox
+    QProgressBar, QSpinBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, pyqtSlot
 from PyQt6.QtGui import QPixmap, QImage
@@ -189,6 +189,9 @@ class RecordingPage(QWidget):
         self.setup_ui()
         self.setup_connections()
 
+        # 自动生成初始文件名
+        self.generate_filename()
+
     def setup_ui(self):
         """设置用户界面"""
         layout = QVBoxLayout(self)
@@ -267,11 +270,23 @@ class RecordingPage(QWidget):
 
         params_layout.addStretch()
 
-        # 自动生成文件名
-        auto_name_checkbox = QCheckBox("自动生成文件名")
-        auto_name_checkbox.setChecked(True)
-        auto_name_checkbox.toggled.connect(self.toggle_auto_filename)
-        params_layout.addWidget(auto_name_checkbox)
+        # 自动生成文件名按钮
+        auto_name_button = QPushButton("生成文件名")
+        auto_name_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ColorPalette.INFO};
+                color: white;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 6px 12px;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{
+                background-color: {ColorPalette.PRIMARY_HOVER};
+            }}
+        """)
+        auto_name_button.clicked.connect(self.generate_filename)
+        params_layout.addWidget(auto_name_button)
 
         layout.addLayout(params_layout)
 
@@ -408,21 +423,27 @@ class RecordingPage(QWidget):
 
     def browse_save_path(self):
         """浏览保存路径"""
+        # 获取当前文件名作为默认值
+        current_filename = self.save_path_input.text() or f"recording_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "选择保存路径",
-            f"recording_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4",
+            current_filename,
             "视频文件 (*.mp4);;所有文件 (*)"
         )
 
         if file_path:
             self.save_path_input.setText(file_path)
 
-    def toggle_auto_filename(self, checked):
-        """切换自动文件名"""
-        if checked:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            self.save_path_input.setText(f"recording_{timestamp}.mp4")
+    def generate_filename(self):
+        """生成新的文件名"""
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"recording_{timestamp}.mp4"
+        self.save_path_input.setText(filename)
+
+        # 显示提示信息
+        self.status_label.setText(f"已生成文件名: {filename}")
 
     def toggle_recording(self):
         """切换录制状态"""
