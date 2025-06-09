@@ -1,5 +1,5 @@
 """
-视频录制页面
+视频录制页面 - 修复WebSocket连接问题
 """
 import cv2
 import asyncio
@@ -18,7 +18,7 @@ from styles import StyleSheet, ColorPalette
 
 
 class WebSocketImageReceiver(QThread):
-    """WebSocket图像接收线程"""
+    """WebSocket图像接收线程 - 修复版"""
 
     image_received = pyqtSignal(np.ndarray)
     connection_status_changed = pyqtSignal(bool, str)  # connected, message
@@ -29,48 +29,94 @@ class WebSocketImageReceiver(QThread):
         self.port = port
         self.ws = None
         self.running = False
+        self.frame_count = 0
+        self.total_bytes_received = 0
 
     def run(self):
         """运行WebSocket连接"""
         try:
-            url = f"ws://{self.ip_address}:{self.port}"
+            # 修改URL格式，参考HTML中的成功实现
+            url = f"ws://{self.ip_address}/ws"  # 注意这里改为 /ws 路径
+            print(f"尝试连接到: {url}")
+
+            # 添加更多的WebSocket选项
             self.ws = websocket.WebSocketApp(
                 url,
                 on_open=self.on_open,
                 on_message=self.on_message,
                 on_error=self.on_error,
-                on_close=self.on_close
+                on_close=self.on_close,
+                on_ping=self.on_ping,
+                on_pong=self.on_pong
             )
+
             self.running = True
-            self.ws.run_forever()
+            # 添加ping_interval来保持连接活跃
+            self.ws.run_forever(ping_interval=30, ping_timeout=10)
+
         except Exception as e:
+            print(f"WebSocket连接异常: {e}")
             self.connection_status_changed.emit(False, f"连接失败: {str(e)}")
 
     def on_open(self, ws):
         """连接打开"""
+        print("WebSocket连接已建立")
         self.connection_status_changed.emit(True, "已连接")
+        self.frame_count = 0
+        self.total_bytes_received = 0
 
     def on_message(self, ws, message):
-        """接收消息"""
+        """接收消息 - 参考HTML实现"""
         try:
-            # 假设接收的是JPEG图像数据
-            img_array = np.frombuffer(message, dtype=np.uint8)
-            image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-            if image is not None:
-                self.image_received.emit(image)
+            # 检查消息类型
+            if isinstance(message, bytes):
+                # 二进制数据，应该是JPEG图像
+                self.total_bytes_received += len(message)
+
+                # 使用numpy处理字节数据
+                img_array = np.frombuffer(message, dtype=np.uint8)
+
+                # 解码JPEG图像
+                image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+                if image is not None:
+                    self.frame_count += 1
+                    if self.frame_count % 30 == 0:  # 每30帧打印一次统计
+                        print(f"已接收 {self.frame_count} 帧，总字节数: {self.total_bytes_received}")
+
+                    self.image_received.emit(image)
+                else:
+                    print("图像解码失败")
+            else:
+                # 文本消息
+                print(f"收到文本消息: {message}")
+
         except Exception as e:
             print(f"解析图像失败: {e}")
+            # 不要因为单帧解析失败就断开连接，继续尝试
 
     def on_error(self, ws, error):
         """连接错误"""
+        print(f"WebSocket错误: {error}")
         self.connection_status_changed.emit(False, f"连接错误: {str(error)}")
 
     def on_close(self, ws, close_status_code, close_msg):
         """连接关闭"""
+        print(f"WebSocket连接已关闭: {close_status_code} - {close_msg}")
         self.connection_status_changed.emit(False, "连接已断开")
+        self.running = False
+
+    def on_ping(self, ws, message):
+        """收到ping"""
+        print("收到ping")
+
+    def on_pong(self, ws, message):
+        """收到pong"""
+        print("收到pong")
 
     def stop(self):
         """停止连接"""
+        print("停止WebSocket连接")
         self.running = False
         if self.ws:
             self.ws.close()
@@ -93,6 +139,7 @@ class VideoRecorder:
             self.writer = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
             self.is_recording = True
             self.frame_count = 0
+            print(f"开始录制到: {output_path}, 尺寸: {frame_size}, 帧率: {fps}")
             return True
         except Exception as e:
             print(f"开始录制失败: {e}")
@@ -110,6 +157,7 @@ class VideoRecorder:
             self.writer.release()
             self.writer = None
         self.is_recording = False
+        print(f"录制停止，共录制 {self.frame_count} 帧")
         return self.output_path, self.frame_count
 
 
@@ -180,15 +228,15 @@ class RecordingPage(QWidget):
 
         # IP地址输入
         layout.addWidget(QLabel("IP地址:"))
-        self.ip_input = QLineEdit("192.168.1.100")
-        self.ip_input.setPlaceholderText("例如: 192.168.1.100")
+        self.ip_input = QLineEdit("192.168.31.101")  # 修改默认IP
+        self.ip_input.setPlaceholderText("例如: 192.168.31.101")
         layout.addWidget(self.ip_input)
 
-        # 端口输入
+        # 端口输入（实际上对于/ws路径可能不需要）
         layout.addWidget(QLabel("端口:"))
         self.port_input = QSpinBox()
         self.port_input.setRange(1000, 65535)
-        self.port_input.setValue(8080)
+        self.port_input.setValue(80)  # ESP32默认HTTP端口
         layout.addWidget(self.port_input)
 
         # 连接按钮
@@ -287,14 +335,13 @@ class RecordingPage(QWidget):
     def connect_websocket(self):
         """连接WebSocket"""
         ip = self.ip_input.text().strip()
-        port = self.port_input.value()
 
         if not ip:
             QMessageBox.warning(self, "警告", "请输入IP地址")
             return
 
-        # 创建WebSocket接收器
-        self.ws_receiver = WebSocketImageReceiver(ip, port)
+        # 创建WebSocket接收器，不使用端口参数（因为使用/ws路径）
+        self.ws_receiver = WebSocketImageReceiver(ip)
         self.ws_receiver.image_received.connect(self.on_image_received)
         self.ws_receiver.connection_status_changed.connect(self.on_connection_status_changed)
         self.ws_receiver.start()
@@ -409,7 +456,7 @@ class RecordingPage(QWidget):
 
     def start_recording(self):
         """开始录制"""
-        if not self.current_frame is not None:
+        if self.current_frame is None:
             QMessageBox.warning(self, "警告", "没有接收到视频帧")
             return
 
