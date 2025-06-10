@@ -1,5 +1,6 @@
 """
-多标签面部动作数据集导出器
+多标签面部动作数据集导出器 - 修复版本
+解决"导出成功却显示取消"的问题
 """
 import os
 import cv2
@@ -551,9 +552,8 @@ class MultiLabelDatasetExporter:
         self.cancelled = True
 
 
-# 简单进度对话框保持不变，只需要修改标题和提示信息
-class MultiLabelProgressDialog(QDialog):
-    """多标签进度对话框"""
+class FixedMultiLabelProgressDialog(QDialog):
+    """修复后的多标签进度对话框 - 解决取消逻辑问题"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -593,7 +593,10 @@ class MultiLabelProgressDialog(QDialog):
 
         layout.addLayout(button_layout)
 
-        self.cancelled = False
+        # 状态标记 - 关键修复点
+        self.user_cancelled = False          # 用户主动取消
+        self.export_completed = False        # 导出完成标记
+        self.natural_close = False           # 自然关闭标记
         self.exporter = None
 
     def set_exporter(self, exporter):
@@ -602,7 +605,7 @@ class MultiLabelProgressDialog(QDialog):
 
     def update_progress(self, value: int, message: str) -> bool:
         """更新进度"""
-        if self.cancelled:
+        if self.user_cancelled:
             return False
 
         self.progress_bar.setValue(value)
@@ -611,28 +614,49 @@ class MultiLabelProgressDialog(QDialog):
         self.debug_text.append(f"[{value}%] {message}")
         self.debug_text.ensureCursorVisible()
 
+        # 标记导出完成
+        if value >= 100:
+            self.export_completed = True
+
         QApplication.processEvents()
-        return not self.cancelled
+        return not self.user_cancelled
 
     def cancel_export(self):
-        """取消导出"""
-        self.cancelled = True
+        """用户主动取消导出"""
+        self.user_cancelled = True
         if self.exporter:
             self.exporter.cancel_export()
         self.cancel_button.setText("取消中...")
         self.cancel_button.setEnabled(False)
         self.status_label.setText("正在取消多标签导出...")
 
+    def close_naturally(self):
+        """自然关闭对话框（导出完成后）"""
+        self.natural_close = True
+        self.close()
+
     def closeEvent(self, event):
-        """关闭事件"""
-        if not self.cancelled:
+        """关闭事件 - 修复关键逻辑"""
+        # 如果是自然关闭（导出完成），不设置取消状态
+        if self.natural_close or self.export_completed:
+            event.accept()
+            return
+
+        # 如果还没有标记为用户取消，且导出未完成，则认为是用户关闭窗口
+        if not self.user_cancelled and not self.export_completed:
             self.cancel_export()
+
         event.accept()
 
+    @property
+    def cancelled(self):
+        """获取取消状态 - 只有用户主动取消才返回True"""
+        return self.user_cancelled
 
-def export_multi_label_dataset(parent, video_path: str, annotations: List[AnnotationMarker],
-                               video_info: VideoInfo) -> bool:
-    """多标签数据集导出入口函数"""
+
+def export_multi_label_dataset_fixed(parent, video_path: str, annotations: List[AnnotationMarker],
+                                    video_info: VideoInfo) -> bool:
+    """修复后的多标签数据集导出入口函数"""
     try:
         # 基本验证
         if not annotations:
@@ -693,8 +717,8 @@ def export_multi_label_dataset(parent, video_path: str, annotations: List[Annota
         if not output_dir:
             return False
 
-        # 创建进度对话框
-        progress_dialog = MultiLabelProgressDialog(parent)
+        # 创建修复后的进度对话框
+        progress_dialog = FixedMultiLabelProgressDialog(parent)
 
         # 创建导出器
         exporter = MultiLabelDatasetExporter(
@@ -713,15 +737,17 @@ def export_multi_label_dataset(parent, video_path: str, annotations: List[Annota
 
         success = exporter.export_dataset(progress_callback)
 
-        # 关闭进度对话框
-        progress_dialog.close()
+        # 修复：区分完成关闭和用户取消
+        if progress_dialog.export_completed:
+            # 导出完成，自然关闭对话框
+            progress_dialog.close_naturally()
+        else:
+            # 未完成，正常关闭
+            progress_dialog.close()
 
-        # 根据结果显示不同消息
-        if progress_dialog.cancelled or exporter.cancelled:
-            QMessageBox.information(parent, "已取消", "多标签导出已被用户取消")
-            return False
-        elif success:
-            # 导出成功
+        # 修复后的判断逻辑：先检查成功，再检查取消
+        if success and not progress_dialog.cancelled:
+            # 导出成功且未被取消
             stats = exporter.stats
 
             result_msg = f"""多标签面部动作数据集导出完成！
@@ -745,8 +771,14 @@ def export_multi_label_dataset(parent, video_path: str, annotations: List[Annota
 
             QMessageBox.information(parent, "导出成功", result_msg)
             return True
+
+        elif progress_dialog.cancelled or exporter.cancelled:
+            # 用户主动取消
+            QMessageBox.information(parent, "已取消", "多标签导出已被用户取消")
+            return False
+
         else:
-            # 导出失败
+            # 导出失败（非取消原因）
             error_details = "\n".join(exporter.stats['errors'][-5:]) if exporter.stats['errors'] else "未知错误"
             detailed_msg = f"""多标签导出过程中出现错误:
 

@@ -1,5 +1,5 @@
 """
-主应用程序窗口 - 多标签支持版本
+主应用程序窗口 - 修复导出逻辑版本
 """
 import sys
 import os
@@ -13,7 +13,7 @@ from PyQt6.QtGui import QAction, QKeySequence, QIcon
 # 导入页面组件
 try:
     from recording_page import RecordingPage
-    # 使用新的多标签页面
+    # 使用修复后的多标签页面
     from annotation_page import MultiLabelAnnotationPage
     from styles import StyleSheet, ColorPalette
 except ImportError as e:
@@ -23,7 +23,7 @@ except ImportError as e:
 
 
 class MultiLabelVideoAnnotationMainWindow(QMainWindow):
-    """多标签视频标注主应用程序窗口"""
+    """多标签视频标注主应用程序窗口 - 修复导出逻辑版本"""
 
     def __init__(self):
         super().__init__()
@@ -47,7 +47,7 @@ class MultiLabelVideoAnnotationMainWindow(QMainWindow):
 
     def setup_ui(self):
         """设置用户界面"""
-        self.setWindowTitle("AI视频多标签动作标注工具 v2.0")
+        self.setWindowTitle("AI视频多标签动作标注工具 v2.0 (修复版)")
         self.setGeometry(100, 100, 1600, 900)
 
         # 创建中央部件
@@ -78,7 +78,7 @@ class MultiLabelVideoAnnotationMainWindow(QMainWindow):
         self.recording_page = RecordingPage()
         self.tab_widget.addTab(self.recording_page, "📹 视频录制")
 
-        # 多标签视频标注页面
+        # 多标签视频标注页面（使用修复版）
         self.annotation_page = MultiLabelAnnotationPage()
         self.tab_widget.addTab(self.annotation_page, "🎯 多标签标注")
 
@@ -203,10 +203,10 @@ class MultiLabelVideoAnnotationMainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        # 多标签数据集导出
-        export_dataset_action = QAction("导出多标签数据集", self)
+        # 多标签数据集导出（修复版）
+        export_dataset_action = QAction("导出多标签数据集 🔧修复版", self)
         export_dataset_action.setShortcut("Ctrl+Shift+E")
-        export_dataset_action.setToolTip("将多标签标注片段导出为图像和标注文件数据集")
+        export_dataset_action.setToolTip("将多标签标注片段导出为图像和标注文件数据集（已修复取消逻辑问题）")
         export_dataset_action.triggered.connect(self.export_multi_label_dataset)
         file_menu.addAction(export_dataset_action)
 
@@ -257,6 +257,11 @@ class MultiLabelVideoAnnotationMainWindow(QMainWindow):
         user_guide_action.triggered.connect(self.show_user_guide)
         help_menu.addAction(user_guide_action)
 
+        # 修复说明
+        fix_info_action = QAction("修复说明", self)
+        fix_info_action.triggered.connect(self.show_fix_info)
+        help_menu.addAction(fix_info_action)
+
         about_action = QAction("关于", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
@@ -272,8 +277,9 @@ class MultiLabelVideoAnnotationMainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "请先切换到多标签标注页面")
 
     def export_multi_label_dataset(self):
-        """导出多标签数据集"""
+        """导出多标签数据集 - 使用修复后的版本"""
         if self.annotation_page:
+            print("🔧 主窗口调用修复版导出...")  # 调试信息
             self.annotation_page.export_multi_label_dataset()
         else:
             QMessageBox.information(self, "提示", "请先切换到多标签标注页面")
@@ -381,9 +387,9 @@ class MultiLabelVideoAnnotationMainWindow(QMainWindow):
         multi_label_action.triggered.connect(self.create_multi_label_annotation)
         toolbar.addAction(multi_label_action)
 
-        # 数据集导出
-        dataset_action = QAction("📊 导出数据集", self)
-        dataset_action.setToolTip("导出多标签数据集")
+        # 数据集导出（修复版）
+        dataset_action = QAction("📊 导出数据集 🔧", self)
+        dataset_action.setToolTip("导出多标签数据集（修复版）")
         dataset_action.triggered.connect(self.export_multi_label_dataset)
         toolbar.addAction(dataset_action)
 
@@ -399,7 +405,7 @@ class MultiLabelVideoAnnotationMainWindow(QMainWindow):
         """创建状态栏"""
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 - 支持多标签和不同进度类型的视频标注工具")
+        self.status_bar.showMessage("就绪 - 支持多标签和不同进度类型的视频标注工具（已修复导出逻辑）")
 
     def apply_theme(self):
         """应用主题"""
@@ -475,10 +481,41 @@ class MultiLabelVideoAnnotationMainWindow(QMainWindow):
         """显示设置对话框"""
         QMessageBox.information(self, "设置", "设置功能正在开发中...")
 
+    def show_fix_info(self):
+        """显示修复说明"""
+        fix_info = """
+🔧 导出逻辑修复说明
+
+【问题描述】
+在之前的版本中，即使数据集成功导出，程序也会错误地显示"导出已被用户取消"的消息，并且不会自动清空标注列表。
+
+【问题原因】
+1. 进度对话框关闭时的逻辑错误
+2. 成功完成与用户取消的判断顺序有误
+3. 对话框closeEvent中误设取消状态
+
+【修复内容】
+✅ 修复进度对话框的关闭逻辑
+✅ 区分"完成后关闭"和"用户主动取消"
+✅ 调整判断顺序：先检查成功，再检查取消
+✅ 添加调试信息便于排查问题
+✅ 完善状态标记和流程控制
+
+【修复效果】
+• 导出成功后正确显示成功消息
+• 可以正常询问是否清空标注列表
+• 用户主动取消时正确显示取消消息
+• 导出过程更加稳定可靠
+
+【使用建议】
+如果仍遇到问题，请查看控制台输出的调试信息，这将帮助定位具体问题所在。
+        """
+        QMessageBox.information(self, "修复说明", fix_info)
+
     def show_user_guide(self):
         """显示使用指南"""
         guide_text = """
-AI视频多标签动作标注工具使用指南 v2.0
+AI视频多标签动作标注工具使用指南 v2.0 (修复版)
 
 【录制页面】
 1. 输入设备IP地址和端口
@@ -502,12 +539,13 @@ AI视频多标签动作标注工具使用指南 v2.0
 • 线性增长：动作强度从0线性增长到设定值
 • 恒定强度：动作强度在整个时间段内保持恒定
 
-【数据集导出功能】
+【数据集导出功能】 🔧已修复
 • 自动提取标注片段的每一帧
 • 生成45维向量标注文件（对应45个面部动作）
 • 支持多标签同时激活
 • 根据进度类型计算每帧的动作强度
 • 自动应用舌头动作相关规则
+• ✅ 修复了"导出成功却显示取消"的问题
 
 【快捷键】
 - Ctrl+R: 切换到录制页面
@@ -526,13 +564,14 @@ AI视频多标签动作标注工具使用指南 v2.0
 - 时间线显示多标签指示器
 - 工具提示显示详细的多标签信息
 - 数据集导出支持复杂的多标签组合
+- 🔧 已修复导出逻辑问题，确保正确的成功/取消判断
 """
         QMessageBox.information(self, "使用指南", guide_text)
 
     def show_about(self):
         """显示关于信息"""
         about_text = """
-AI视频多标签动作标注工具 v2.0
+AI视频多标签动作标注工具 v2.0 (修复版)
 
 【核心功能】
 📹 实时视频录制
@@ -565,11 +604,19 @@ AI视频多标签动作标注工具 v2.0
 • 📊 多标签统计：详细的使用统计和分析
 • 🎯 增强的时间线：多标签可视化和工具提示
 
+【修复内容 (修复版)】
+• 🔧 修复导出逻辑：解决"成功却显示取消"的问题
+• ✅ 改进状态判断：正确区分完成和取消
+• 🐛 优化对话框关闭逻辑：避免误判
+• 📝 添加调试信息：便于问题排查
+• 🎯 增强用户体验：确保正确的反馈信息
+
 【开发信息】
-版本: 2.0 (多标签支持)
+版本: 2.0 (修复版)
 更新: 2024年
 技术栈: Python, PyQt6, OpenCV, WebSocket
 新特性: 多标签标注, 进度类型, 智能导出
+修复: 导出逻辑, 状态判断, 用户反馈
         """
         QMessageBox.about(self, "关于", about_text)
 

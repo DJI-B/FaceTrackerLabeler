@@ -1,5 +1,5 @@
 """
-视频标注页面 - 多标签支持版本
+视频标注页面 - 修复导出逻辑版本
 """
 import os
 from PyQt6.QtWidgets import (
@@ -24,7 +24,7 @@ from utils import TimeUtils, FileUtils
 
 
 class MultiLabelAnnotationPage(QWidget):
-    """多标签视频标注页面"""
+    """多标签视频标注页面 - 修复导出逻辑版本"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -783,7 +783,7 @@ class MultiLabelAnnotationPage(QWidget):
         return False
 
     def export_multi_label_dataset(self):
-        """导出多标签数据集"""
+        """导出多标签数据集 - 使用修复后的导出函数"""
         if not self.annotation_manager.annotations:
             QMessageBox.warning(self, "警告", "暂无标注数据可导出为数据集")
             return
@@ -797,16 +797,21 @@ class MultiLabelAnnotationPage(QWidget):
             return
 
         try:
-            # 导入多标签导出器
-            from dataset_exporter import export_multi_label_dataset
+            # 使用修复后的多标签导出器
+            from dataset_exporter import export_multi_label_dataset_fixed
 
-            export_success = export_multi_label_dataset(
+            print("🔧 使用修复后的导出函数...")  # 调试信息
+
+            export_success = export_multi_label_dataset_fixed(
                 self,
                 self.annotation_manager.video_info.file_path,
                 self.annotation_manager.annotations,
                 self.annotation_manager.video_info
             )
 
+            print(f"📊 导出结果: {export_success}")  # 调试信息
+
+            # 只有在真正成功时才询问是否清空
             if export_success:
                 reply = QMessageBox.question(
                     self,
@@ -828,4 +833,5 @@ class MultiLabelAnnotationPage(QWidget):
                     )
 
         except Exception as e:
+            print(f"❌ 导出异常: {e}")  # 调试信息
             QMessageBox.critical(self, "导出错误", f"多标签数据集导出失败: {str(e)}")
