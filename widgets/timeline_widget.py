@@ -1,23 +1,23 @@
 """
-自定义时间线控件
+多标签支持的时间线控件
 """
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QWidget, QToolTip
 from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QLinearGradient, QFont
 from typing import List
 from models import AnnotationMarker
-from styles import ColorPalette
+from styles import ColorPalette, FacialActionConfig
 
 
-class TimelineWidget(QWidget):
-    """自定义时间线控件"""
+class MultiLabelTimelineWidget(QWidget):
+    """支持多标签的时间线控件"""
 
     position_changed = pyqtSignal(float)
     annotation_clicked = pyqtSignal(AnnotationMarker)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(100)
+        self.setFixedHeight(120)  # 增加高度以支持多标签显示
         self.setMinimumWidth(600)
         self.setMouseTracking(True)
 
@@ -29,7 +29,7 @@ class TimelineWidget(QWidget):
         # 绘制属性
         self.margin = 30
         self.timeline_height = 8
-        self.marker_height = 25
+        self.marker_height = 35  # 增加标记高度
         self.scale_height = 15
         self.is_dragging = False
         self.hover_annotation = None
@@ -114,7 +114,7 @@ class TimelineWidget(QWidget):
 
         # 绘制标注区间
         for annotation in self.annotations:
-            self.draw_annotation(painter, annotation)
+            self.draw_multi_label_annotation(painter, annotation)
 
         # 绘制播放头
         self.draw_playhead(painter)
@@ -170,8 +170,8 @@ class TimelineWidget(QWidget):
             )
             painter.fillRect(played_rect, self.timeline_active_color)
 
-    def draw_annotation(self, painter: QPainter, annotation: AnnotationMarker):
-        """绘制标注区间"""
+    def draw_multi_label_annotation(self, painter: QPainter, annotation: AnnotationMarker):
+        """绘制多标签标注区间"""
         start_x = self.time_to_x(annotation.start_time)
         end_x = self.time_to_x(annotation.end_time)
         width = max(end_x - start_x, 2)  # 最小宽度2像素
@@ -195,17 +195,72 @@ class TimelineWidget(QWidget):
         painter.setPen(QPen(color, 2))
         painter.drawRect(annotation_rect)
 
+        # 绘制多标签指示器
+        if len(annotation.labels) > 1:
+            self.draw_multi_label_indicator(painter, annotation_rect, len(annotation.labels))
+
         # 绘制标签文字
-        if width > 40:  # 只在区间足够宽时显示标签
+        self.draw_annotation_text(painter, annotation_rect, annotation, width)
+
+    def draw_multi_label_indicator(self, painter: QPainter, rect: QRect, label_count: int):
+        """绘制多标签指示器"""
+        # 在右上角绘制标签数量标识
+        indicator_size = 16
+        indicator_x = rect.right() - indicator_size - 2
+        indicator_y = rect.top() + 2
+
+        indicator_rect = QRect(indicator_x, indicator_y, indicator_size, indicator_size)
+
+        # 绘制圆形背景
+        painter.setBrush(QBrush(QColor(255, 165, 0, 200)))  # 橙色背景
+        painter.setPen(QPen(QColor(255, 255, 255), 1))
+        painter.drawEllipse(indicator_rect)
+
+        # 绘制数字
+        painter.setPen(QPen(QColor(255, 255, 255)))
+        painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
+        painter.drawText(indicator_rect, Qt.AlignmentFlag.AlignCenter, str(label_count))
+
+    def draw_annotation_text(self, painter: QPainter, rect: QRect, annotation: AnnotationMarker, width: int):
+        """绘制标注文字"""
+        if width > 60:  # 只在区间足够宽时显示标签
             painter.setPen(QPen(QColor(255, 255, 255)))
             painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
 
-            # 文字居中显示
-            text_rect = painter.fontMetrics().boundingRect(annotation.label)
-            text_x = annotation_rect.x() + (annotation_rect.width() - text_rect.width()) // 2
-            text_y = annotation_rect.y() + (annotation_rect.height() + text_rect.height()) // 2
+            # 多标签显示策略
+            if len(annotation.labels) == 1:
+                # 单标签：显示中文名称
+                chinese_label = FacialActionConfig.get_chinese_label(annotation.labels[0].label)
+                display_text = chinese_label
+            elif len(annotation.labels) <= 3:
+                # 少量多标签：显示简化中文名称
+                chinese_labels = [FacialActionConfig.get_chinese_label(lc.label) for lc in annotation.labels[:3]]
+                display_text = ", ".join(chinese_labels)
+            else:
+                # 大量多标签：显示前两个+数量
+                chinese_labels = [FacialActionConfig.get_chinese_label(lc.label) for lc in annotation.labels[:2]]
+                display_text = f"{', '.join(chinese_labels)}... (+{len(annotation.labels)-2})"
 
-            painter.drawText(text_x, text_y, annotation.label)
+            # 文字居中显示
+            text_rect = painter.fontMetrics().boundingRect(display_text)
+
+            # 如果文字太长，截断显示
+            if text_rect.width() > width - 20:
+                # 简化显示
+                if len(annotation.labels) == 1:
+                    # 单标签：截断中文名称
+                    chinese_label = FacialActionConfig.get_chinese_label(annotation.labels[0].label)
+                    display_text = chinese_label[:4] + "..." if len(chinese_label) > 4 else chinese_label
+                else:
+                    # 多标签：显示数量
+                    display_text = f"{len(annotation.labels)}个动作"
+
+                text_rect = painter.fontMetrics().boundingRect(display_text)
+
+            text_x = rect.x() + (rect.width() - text_rect.width()) // 2
+            text_y = rect.y() + (rect.height() + text_rect.height()) // 2
+
+            painter.drawText(text_x, text_y, display_text)
 
     def draw_playhead(self, painter: QPainter):
         """绘制播放头"""
@@ -256,6 +311,10 @@ class TimelineWidget(QWidget):
             self.hover_annotation = annotation
             self.update()
 
+            # 显示工具提示
+            if annotation:
+                self.show_annotation_tooltip(event, annotation)
+
         # 设置鼠标样式
         if annotation:
             self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -268,6 +327,41 @@ class TimelineWidget(QWidget):
             self.set_position(new_time)
             self.position_changed.emit(self.position)
 
+    def show_annotation_tooltip(self, event, annotation: AnnotationMarker):
+        """显示标注工具提示"""
+        from utils import TimeUtils
+
+        # 构建工具提示内容
+        tooltip_lines = []
+
+        # 时间信息
+        time_info = f"时间: {TimeUtils.format_time(annotation.start_time)} - {TimeUtils.format_time(annotation.end_time)}"
+        tooltip_lines.append(time_info)
+
+        # 标签信息
+        if len(annotation.labels) == 1:
+            label_config = annotation.labels[0]
+            chinese_label = FacialActionConfig.get_chinese_label(label_config.label)
+            intensity_info = f"动作: {chinese_label}"
+            tooltip_lines.append(intensity_info)
+            tooltip_lines.append(f"强度: {label_config.intensity:.2f}")
+            tooltip_lines.append(f"模式: {'线性增长' if label_config.progression.value == 'linear' else '恒定强度'}")
+        else:
+            tooltip_lines.append(f"多标签标注 ({len(annotation.labels)} 个动作):")
+            for i, label_config in enumerate(annotation.labels[:5]):  # 最多显示5个
+                chinese_label = FacialActionConfig.get_chinese_label(label_config.label)
+                mode_text = "线性" if label_config.progression.value == 'linear' else "恒定"
+                tooltip_lines.append(f"  {i+1}. {chinese_label} (强度:{label_config.intensity:.2f}, {mode_text})")
+
+            if len(annotation.labels) > 5:
+                tooltip_lines.append(f"  ... 还有 {len(annotation.labels) - 5} 个动作")
+
+        tooltip_text = "\n".join(tooltip_lines)
+
+        # 显示工具提示
+        global_pos = self.mapToGlobal(event.position().toPoint())
+        QToolTip.showText(global_pos, tooltip_text)
+
     def mouseReleaseEvent(self, event):
         """鼠标释放事件"""
         self.is_dragging = False
@@ -278,3 +372,4 @@ class TimelineWidget(QWidget):
             self.hover_annotation = None
             self.update()
         self.setCursor(Qt.CursorShape.ArrowCursor)
+        QToolTip.hideText()  # 隐藏工具提示

@@ -1,5 +1,5 @@
 """
-主应用程序窗口 - 支持视频录制和标注两个页面（移除JSON导出功能）
+主应用程序窗口 - 多标签支持版本
 """
 import sys
 import os
@@ -13,7 +13,8 @@ from PyQt6.QtGui import QAction, QKeySequence, QIcon
 # 导入页面组件
 try:
     from recording_page import RecordingPage
-    from annotation_page import AnnotationPage
+    # 使用新的多标签页面
+    from annotation_page import MultiLabelAnnotationPage
     from styles import StyleSheet, ColorPalette
 except ImportError as e:
     print(f"导入错误: {e}")
@@ -21,8 +22,8 @@ except ImportError as e:
     sys.exit(1)
 
 
-class VideoAnnotationMainWindow(QMainWindow):
-    """主应用程序窗口"""
+class MultiLabelVideoAnnotationMainWindow(QMainWindow):
+    """多标签视频标注主应用程序窗口"""
 
     def __init__(self):
         super().__init__()
@@ -33,7 +34,7 @@ class VideoAnnotationMainWindow(QMainWindow):
         self.tab_widget = None
 
         # 设置
-        self.settings = QSettings("VideoAnnotationTool", "Settings")
+        self.settings = QSettings("MultiLabelVideoAnnotationTool", "Settings")
 
         try:
             self.setup_ui()
@@ -46,7 +47,7 @@ class VideoAnnotationMainWindow(QMainWindow):
 
     def setup_ui(self):
         """设置用户界面"""
-        self.setWindowTitle("AI视频动作标注工具")
+        self.setWindowTitle("AI视频多标签动作标注工具 v2.0")
         self.setGeometry(100, 100, 1600, 900)
 
         # 创建中央部件
@@ -77,9 +78,9 @@ class VideoAnnotationMainWindow(QMainWindow):
         self.recording_page = RecordingPage()
         self.tab_widget.addTab(self.recording_page, "📹 视频录制")
 
-        # 视频标注页面
-        self.annotation_page = AnnotationPage()
-        self.tab_widget.addTab(self.annotation_page, "🎯 视频标注")
+        # 多标签视频标注页面
+        self.annotation_page = MultiLabelAnnotationPage()
+        self.tab_widget.addTab(self.annotation_page, "🎯 多标签标注")
 
         # 设置标签样式
         self.tab_widget.setStyleSheet("""
@@ -137,7 +138,7 @@ class VideoAnnotationMainWindow(QMainWindow):
         if index == 0:
             self.statusBar().showMessage("当前页面: 视频录制")
         elif index == 1:
-            self.statusBar().showMessage("当前页面: 视频标注")
+            self.statusBar().showMessage("当前页面: 多标签视频标注")
 
     def create_menu_bar(self):
         """创建菜单栏"""
@@ -155,9 +156,9 @@ class VideoAnnotationMainWindow(QMainWindow):
         recording_submenu.addAction(switch_to_recording_action)
 
         # 标注相关
-        annotation_submenu = file_menu.addMenu("标注")
+        annotation_submenu = file_menu.addMenu("多标签标注")
 
-        switch_to_annotation_action = QAction("切换到标注页面", self)
+        switch_to_annotation_action = QAction("切换到多标签标注页面", self)
         switch_to_annotation_action.setShortcut("Ctrl+A")
         switch_to_annotation_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(1))
         annotation_submenu.addAction(switch_to_annotation_action)
@@ -168,6 +169,15 @@ class VideoAnnotationMainWindow(QMainWindow):
         open_video_action.setShortcut(QKeySequence.StandardKey.Open)
         open_video_action.triggered.connect(self.open_video_for_annotation)
         annotation_submenu.addAction(open_video_action)
+
+        # 多标签功能快捷方式
+        annotation_submenu.addSeparator()
+
+        multi_label_action = QAction("创建多标签标注 (M键)", self)
+        multi_label_action.setShortcut("M")
+        multi_label_action.setToolTip("快速创建包含多个标签的标注")
+        multi_label_action.triggered.connect(self.create_multi_label_annotation)
+        annotation_submenu.addAction(multi_label_action)
 
         file_menu.addSeparator()
 
@@ -193,11 +203,11 @@ class VideoAnnotationMainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        # 数据集导出
-        export_dataset_action = QAction("导出数据集", self)
+        # 多标签数据集导出
+        export_dataset_action = QAction("导出多标签数据集", self)
         export_dataset_action.setShortcut("Ctrl+Shift+E")
-        export_dataset_action.setToolTip("将标注片段导出为图像和标注文件数据集")
-        export_dataset_action.triggered.connect(self.export_dataset)
+        export_dataset_action.setToolTip("将多标签标注片段导出为图像和标注文件数据集")
+        export_dataset_action.triggered.connect(self.export_multi_label_dataset)
         file_menu.addAction(export_dataset_action)
 
         file_menu.addSeparator()
@@ -216,8 +226,25 @@ class VideoAnnotationMainWindow(QMainWindow):
         fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
 
-        # 工具菜单
+        # 多标签工具菜单
         tools_menu = menubar.addMenu("工具")
+
+        # 标注统计
+        stats_action = QAction("查看标注统计", self)
+        stats_action.triggered.connect(self.show_annotation_statistics)
+        tools_menu.addAction(stats_action)
+
+        # 验证标注
+        validate_action = QAction("验证标注数据", self)
+        validate_action.triggered.connect(self.validate_annotations)
+        tools_menu.addAction(validate_action)
+
+        # 优化标注
+        optimize_action = QAction("优化标注数据", self)
+        optimize_action.triggered.connect(self.optimize_annotations)
+        tools_menu.addAction(optimize_action)
+
+        tools_menu.addSeparator()
 
         settings_action = QAction("设置", self)
         settings_action.triggered.connect(self.show_settings)
@@ -234,12 +261,88 @@ class VideoAnnotationMainWindow(QMainWindow):
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
 
-    def export_dataset(self):
-        """导出数据集"""
+    def create_multi_label_annotation(self):
+        """创建多标签标注"""
         if self.annotation_page:
-            self.annotation_page.export_dataset()
+            # 确保在标注页面
+            self.tab_widget.setCurrentIndex(1)
+            # 调用页面的多标签标注方法
+            self.annotation_page.create_multi_label_annotation()
         else:
-            QMessageBox.information(self, "提示", "请先切换到标注页面")
+            QMessageBox.information(self, "提示", "请先切换到多标签标注页面")
+
+    def export_multi_label_dataset(self):
+        """导出多标签数据集"""
+        if self.annotation_page:
+            self.annotation_page.export_multi_label_dataset()
+        else:
+            QMessageBox.information(self, "提示", "请先切换到多标签标注页面")
+
+    def show_annotation_statistics(self):
+        """显示标注统计"""
+        if self.annotation_page and self.annotation_page.annotation_manager:
+            stats = self.annotation_page.annotation_manager.get_statistics()
+
+            stats_msg = f"""多标签标注统计信息
+
+总标注数: {stats['total_count']}
+总时长: {stats['total_duration']:.1f} 秒
+平均时长: {stats['average_duration']:.1f} 秒
+
+多标签统计:
+• 单标签标注: {stats['multi_label_stats']['single_label_count']}
+• 多标签标注: {stats['multi_label_stats']['multi_label_count']}
+• 最大标签数: {stats['multi_label_stats']['max_labels_per_annotation']}
+• 总标签数: {stats['multi_label_stats']['total_labels']}
+• 平均每个标注的标签数: {stats['multi_label_stats']['avg_labels_per_annotation']:.1f}
+
+进度类型统计:
+• 线性增长: {stats['progression_stats']['linear_count']} ({stats['progression_stats']['linear_percentage']:.1f}%)
+• 恒定强度: {stats['progression_stats']['constant_count']} ({stats['progression_stats']['constant_percentage']:.1f}%)
+
+动作使用频率 (前10):"""
+
+            # 添加最常用的动作
+            sorted_labels = sorted(stats['labels'].items(), key=lambda x: x[1]['count'], reverse=True)
+            for i, (label, data) in enumerate(sorted_labels[:10]):
+                from styles import FacialActionConfig
+                chinese_label = FacialActionConfig.get_chinese_label(label)
+                stats_msg += f"\n{i+1}. {chinese_label}: {data['count']} 次 (平均强度: {data['avg_intensity']:.2f})"
+
+            QMessageBox.information(self, "标注统计", stats_msg)
+        else:
+            QMessageBox.information(self, "提示", "没有标注数据")
+
+    def validate_annotations(self):
+        """验证标注数据"""
+        if self.annotation_page and self.annotation_page.annotation_manager:
+            issues = self.annotation_page.annotation_manager.validate_annotations()
+
+            if not issues:
+                QMessageBox.information(self, "验证结果", "所有标注数据都是有效的！")
+            else:
+                issues_msg = "发现以下问题:\n\n" + "\n".join(issues)
+                QMessageBox.warning(self, "验证结果", issues_msg)
+        else:
+            QMessageBox.information(self, "提示", "没有标注数据需要验证")
+
+    def optimize_annotations(self):
+        """优化标注数据"""
+        if self.annotation_page and self.annotation_page.annotation_manager:
+            optimized_count = self.annotation_page.annotation_manager.optimize_annotations()
+
+            if optimized_count > 0:
+                QMessageBox.information(
+                    self,
+                    "优化完成",
+                    f"已优化 {optimized_count} 个问题\n\n主要优化内容:\n• 移除重复标签\n• 修正强度值范围"
+                )
+                # 更新显示
+                self.annotation_page.update_annotation_list()
+            else:
+                QMessageBox.information(self, "优化结果", "标注数据已经是最优状态！")
+        else:
+            QMessageBox.information(self, "提示", "没有标注数据需要优化")
 
     def create_toolbar(self):
         """创建工具栏"""
@@ -247,42 +350,56 @@ class VideoAnnotationMainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         # 页面切换
-        recording_action = QAction("录制", self)
+        recording_action = QAction("📹 录制", self)
         recording_action.setToolTip("切换到视频录制页面")
         recording_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(0))
         toolbar.addAction(recording_action)
 
-        annotation_action = QAction("标注", self)
-        annotation_action.setToolTip("切换到视频标注页面")
+        annotation_action = QAction("🎯 多标签标注", self)
+        annotation_action.setToolTip("切换到多标签视频标注页面")
         annotation_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(1))
         toolbar.addAction(annotation_action)
 
         toolbar.addSeparator()
 
         # 文件操作
-        open_action = QAction("打开", self)
-        open_action.setToolTip("打开视频文件进行标注")
+        open_action = QAction("📂 打开", self)
+        open_action.setToolTip("打开视频文件进行多标签标注")
         open_action.triggered.connect(self.open_video_for_annotation)
         toolbar.addAction(open_action)
 
-        save_action = QAction("保存", self)
+        save_action = QAction("💾 保存", self)
         save_action.setToolTip("保存当前项目")
         save_action.triggered.connect(self.save_project)
         toolbar.addAction(save_action)
 
         toolbar.addSeparator()
 
+        # 多标签功能
+        multi_label_action = QAction("🏷️ 多标签", self)
+        multi_label_action.setToolTip("创建多标签标注 (M键)")
+        multi_label_action.triggered.connect(self.create_multi_label_annotation)
+        toolbar.addAction(multi_label_action)
+
         # 数据集导出
-        dataset_action = QAction("导出数据集", self)
-        dataset_action.setToolTip("导出数据集")
-        dataset_action.triggered.connect(self.export_dataset)
+        dataset_action = QAction("📊 导出数据集", self)
+        dataset_action.setToolTip("导出多标签数据集")
+        dataset_action.triggered.connect(self.export_multi_label_dataset)
         toolbar.addAction(dataset_action)
+
+        toolbar.addSeparator()
+
+        # 统计信息
+        stats_action = QAction("📈 统计", self)
+        stats_action.setToolTip("查看多标签标注统计")
+        stats_action.triggered.connect(self.show_annotation_statistics)
+        toolbar.addAction(stats_action)
 
     def create_status_bar(self):
         """创建状态栏"""
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 - 请选择录制视频或标注现有视频")
+        self.status_bar.showMessage("就绪 - 支持多标签和不同进度类型的视频标注工具")
 
     def apply_theme(self):
         """应用主题"""
@@ -314,7 +431,7 @@ class VideoAnnotationMainWindow(QMainWindow):
     # === 菜单操作方法 ===
 
     def open_video_for_annotation(self):
-        """为标注打开视频文件"""
+        """为多标签标注打开视频文件"""
         # 切换到标注页面
         self.tab_widget.setCurrentIndex(1)
 
@@ -335,13 +452,13 @@ class VideoAnnotationMainWindow(QMainWindow):
         if self.annotation_page:
             self.annotation_page.open_project()
 
-    def save_project(self):
+    def save_project(self) -> bool:
         """保存项目"""
         if self.annotation_page:
             return self.annotation_page.save_project()
         return False
 
-    def save_project_as(self):
+    def save_project_as(self) -> bool:
         """另存项目"""
         if self.annotation_page:
             return self.annotation_page.save_project_as()
@@ -361,7 +478,7 @@ class VideoAnnotationMainWindow(QMainWindow):
     def show_user_guide(self):
         """显示使用指南"""
         guide_text = """
-AI视频动作标注工具使用指南
+AI视频多标签动作标注工具使用指南 v2.0
 
 【录制页面】
 1. 输入设备IP地址和端口
@@ -370,65 +487,89 @@ AI视频动作标注工具使用指南
 4. 点击"开始录制"开始录制视频
 5. 录制完成后可选择自动切换到标注页面
 
-【标注页面】
+【多标签标注页面】 ✨新功能
 1. 选择视频文件或加载录制的视频
 2. 使用播放控制观看视频
 3. 标记起点和终点创建标注区间
-4. 使用快速标注按钮或自定义标签
-5. 管理标注列表，编辑或删除标注
-6. 保存项目或导出数据集
+
+【多标签标注功能】
+• 🎯 多标签标注：同时为一个时间段添加多个动作标签
+• 📈 进度类型设置：每个标签可选择"线性增长"或"恒定强度"
+• 🎚️ 强度调节：为每个标签独立设置动作强度 (0.0-1.0)
+• 🔄 快速操作：快捷按钮快速添加常用单标签，或使用多标签对话框
+
+【进度类型说明】
+• 线性增长：动作强度从0线性增长到设定值
+• 恒定强度：动作强度在整个时间段内保持恒定
 
 【数据集导出功能】
 • 自动提取标注片段的每一帧
-• 生成对应的标注文件（TXT格式）
-• 动作进度从0.0到1.0递增
-• 输出到images和labels文件夹
-• 保证文件名唯一性
+• 生成45维向量标注文件（对应45个面部动作）
+• 支持多标签同时激活
+• 根据进度类型计算每帧的动作强度
+• 自动应用舌头动作相关规则
 
 【快捷键】
 - Ctrl+R: 切换到录制页面
-- Ctrl+A: 切换到标注页面
+- Ctrl+A: 切换到多标签标注页面
 - Ctrl+O: 打开视频文件
 - Ctrl+S: 保存项目
-- Ctrl+Shift+E: 导出数据集
-- F11: 全屏模式
+- Ctrl+Shift+E: 导出多标签数据集
+- M键: 创建多标签标注 ✨新功能
+- A/D键: 逐帧后退/前进
+- 空格键: 播放/暂停
+- S/E键: 标记起点/终点
 
 【注意事项】
-- WebSocket连接需要确保网络连通性
-- 录制时请确保有足够的存储空间
-- 标注时间区间不能重叠
-- 数据集导出需要较大存储空间
+- 每个标注可以包含多个标签
+- 每个标签可以独立设置强度和进度类型
+- 时间线显示多标签指示器
+- 工具提示显示详细的多标签信息
+- 数据集导出支持复杂的多标签组合
 """
         QMessageBox.information(self, "使用指南", guide_text)
 
     def show_about(self):
         """显示关于信息"""
         about_text = """
-AI视频动作标注工具 v2.0
+AI视频多标签动作标注工具 v2.0
 
-【主要功能】
+【核心功能】
 📹 实时视频录制
   • WebSocket视频流接收
   • 自定义录制参数
   • 自动文件管理
 
-🎯 智能视频标注
-  • 精确时间线控制
-  • 快速标注预设
-  • 可视化标注管理
+🎯 多标签智能视频标注 ✨新功能
+  • 支持每个标注同时包含多个标签
+  • 每个标签独立设置强度和进度类型
+  • 精确时间线控制和可视化
+  • 智能工具提示和多标签指示器
   • 项目保存与加载
-  • 数据集导出
+  • 多标签数据集导出
 
 【技术特性】
 • 基于PyQt6开发
-• 支持多种视频格式
+• 支持45种面部动作标注
+• 多标签同时标注支持
+• 线性增长和恒定强度两种进度模式
 • 实时图像处理
 • 响应式用户界面
+• 自动舌头动作规则应用
+
+【新增功能 v2.0】
+• ✨ 多标签标注：一个时间段可同时标注多个动作
+• 📈 进度类型：线性增长 vs 恒定强度
+• 🎚️ 独立强度设置：每个标签可设置不同强度
+• 🏷️ 智能标签管理：自动去重和优化
+• 📊 多标签统计：详细的使用统计和分析
+• 🎯 增强的时间线：多标签可视化和工具提示
 
 【开发信息】
-版本: 2.0
+版本: 2.0 (多标签支持)
 更新: 2024年
 技术栈: Python, PyQt6, OpenCV, WebSocket
+新特性: 多标签标注, 进度类型, 智能导出
         """
         QMessageBox.about(self, "关于", about_text)
 
@@ -442,7 +583,7 @@ AI视频动作标注工具 v2.0
             reply = QMessageBox.question(
                 self,
                 "保存更改",
-                "标注项目有未保存的更改，是否保存？",
+                "多标签标注项目有未保存的更改，是否保存？",
                 QMessageBox.StandardButton.Save |
                 QMessageBox.StandardButton.Discard |
                 QMessageBox.StandardButton.Cancel

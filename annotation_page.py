@@ -1,9 +1,5 @@
 """
-视频标注页面 - 修复版本
-1. 添加逐帧观看功能
-2. 允许起点修改
-3. 导出后自动清空标注列表
-4. 修复导出成功消息问题
+视频标注页面 - 多标签支持版本
 """
 import os
 from PyQt6.QtWidgets import (
@@ -17,24 +13,25 @@ from PyQt6.QtMultimedia import QMediaPlayer
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 # 导入自定义模块
-from models import AnnotationMarker, VideoInfo
-from annotation_manager import AnnotationManager
+from models import AnnotationMarker, VideoInfo, LabelConfig, ProgressionType
+from annotation_manager import MultiLabelAnnotationManager
 from video_player import VideoPlayerManager
-from widgets.timeline_widget import TimelineWidget
-from widgets.annotation_dialog import AnnotationDialog
+from widgets.timeline_widget import MultiLabelTimelineWidget
+# 导入新的多标签对话框
+from widgets.annotation_dialog import MultiLabelAnnotationDialog
 from styles import StyleSheet, ColorPalette, FacialActionConfig
 from utils import TimeUtils, FileUtils
 
 
-class AnnotationPage(QWidget):
-    """视频标注页面 - 增强版本"""
+class MultiLabelAnnotationPage(QWidget):
+    """多标签视频标注页面"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
         # 核心组件
-        self.annotation_manager = AnnotationManager()
-        self.video_player = None  # 将在setup_ui中初始化
+        self.annotation_manager = MultiLabelAnnotationManager()
+        self.video_player = None
 
         # UI组件
         self.video_widget = None
@@ -45,8 +42,8 @@ class AnnotationPage(QWidget):
         self.stats_label = None
         self.mark_start_button = None
         self.mark_end_button = None
-        
-        # 新增逐帧控制组件
+
+        # 逐帧控制组件
         self.frame_step_spinbox = None
         self.prev_frame_button = None
         self.next_frame_button = None
@@ -59,7 +56,7 @@ class AnnotationPage(QWidget):
             self.setup_ui()
             self.setup_connections()
         except Exception as e:
-            print(f"标注页面初始化失败: {e}")
+            print(f"多标签标注页面初始化失败: {e}")
             raise
 
     def setup_ui(self):
@@ -104,7 +101,7 @@ class AnnotationPage(QWidget):
         controls = self.create_playback_controls()
         layout.addWidget(controls)
 
-        # 逐帧控制区域（新增）
+        # 逐帧控制区域
         frame_controls = self.create_frame_controls()
         layout.addWidget(frame_controls)
 
@@ -112,7 +109,7 @@ class AnnotationPage(QWidget):
         timeline_group = QGroupBox("时间线控制")
         timeline_layout = QVBoxLayout(timeline_group)
 
-        self.timeline = TimelineWidget()
+        self.timeline = MultiLabelTimelineWidget()
         timeline_layout.addWidget(self.timeline)
 
         layout.addWidget(timeline_group)
@@ -124,12 +121,10 @@ class AnnotationPage(QWidget):
         group = QGroupBox("视频文件选择")
         layout = QHBoxLayout(group)
 
-        # 选择文件按钮
         select_file_button = QPushButton("选择视频文件")
         select_file_button.clicked.connect(self.select_video_file)
         layout.addWidget(select_file_button)
 
-        # 当前文件显示
         self.current_file_label = QLabel("未选择文件")
         self.current_file_label.setStyleSheet("color: #999; font-style: italic;")
         layout.addWidget(self.current_file_label)
@@ -182,7 +177,7 @@ class AnnotationPage(QWidget):
         return widget
 
     def create_frame_controls(self) -> QGroupBox:
-        """创建逐帧控制区域（新增功能）"""
+        """创建逐帧控制区域"""
         group = QGroupBox("逐帧控制")
         layout = QHBoxLayout(group)
 
@@ -192,7 +187,6 @@ class AnnotationPage(QWidget):
         self.frame_step_spinbox.setRange(1, 30)
         self.frame_step_spinbox.setValue(1)
         self.frame_step_spinbox.setSuffix(" 帧")
-        self.frame_step_spinbox.setToolTip("设置每次跳跃的帧数")
         layout.addWidget(self.frame_step_spinbox)
 
         layout.addStretch()
@@ -201,22 +195,13 @@ class AnnotationPage(QWidget):
         self.prev_frame_button = QPushButton("◀◀ 后退")
         self.prev_frame_button.setEnabled(False)
         self.prev_frame_button.clicked.connect(self.prev_frame)
-        self.prev_frame_button.setToolTip("后退指定帧数 (快捷键: A)")
         layout.addWidget(self.prev_frame_button)
 
         # 下一帧按钮
         self.next_frame_button = QPushButton("前进 ▶▶")
         self.next_frame_button.setEnabled(False)
         self.next_frame_button.clicked.connect(self.next_frame)
-        self.next_frame_button.setToolTip("前进指定帧数 (快捷键: D)")
         layout.addWidget(self.next_frame_button)
-
-        # 精确跳转
-        precise_button = QPushButton("精确定位")
-        precise_button.setEnabled(False)
-        precise_button.clicked.connect(self.precise_seek)
-        precise_button.setToolTip("输入确切时间跳转")
-        layout.addWidget(precise_button)
 
         return group
 
@@ -230,8 +215,8 @@ class AnnotationPage(QWidget):
         project_group = self.create_project_group()
         layout.addWidget(project_group)
 
-        # 快速标注组
-        quick_group = self.create_quick_annotation_group()
+        # 多标签快速标注组（修改）
+        quick_group = self.create_multi_label_quick_annotation_group()
         layout.addWidget(quick_group)
 
         # 标注列表组
@@ -269,8 +254,8 @@ class AnnotationPage(QWidget):
         save_as_button.clicked.connect(self.save_project_as)
         layout.addWidget(save_as_button, 1, 1)
 
-        # 数据集导出按钮
-        dataset_export_button = QPushButton("导出数据集")
+        # 多标签数据集导出按钮（修改）
+        dataset_export_button = QPushButton("导出多标签数据集")
         dataset_export_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {ColorPalette.INFO};
@@ -280,27 +265,31 @@ class AnnotationPage(QWidget):
                 padding: 8px;
             }}
             QPushButton:hover {{
-                background-color: {ColorPalette.INFO}DD;
-            }}
-            QPushButton:pressed {{
-                background-color: {ColorPalette.INFO}BB;
+                background-color: {ColorPalette.PRIMARY_HOVER};
             }}
         """)
-        dataset_export_button.setToolTip("将标注片段导出为图像和标注文件数据集")
-        dataset_export_button.clicked.connect(self.export_dataset)
-        layout.addWidget(dataset_export_button, 2, 0, 1, 2)  # 占两列
+        dataset_export_button.setToolTip("将多标签标注片段导出为图像和标注文件数据集")
+        dataset_export_button.clicked.connect(self.export_multi_label_dataset)
+        layout.addWidget(dataset_export_button, 2, 0, 1, 2)
 
         return group
 
-    def create_quick_annotation_group(self) -> QGroupBox:
-        """创建快速标注组 - 面部动作版本"""
+    def create_multi_label_quick_annotation_group(self) -> QGroupBox:
+        """创建多标签快速标注组"""
         group = QGroupBox("快速面部动作标注")
-        layout = QGridLayout(group)
-        layout.setSpacing(8)
+        layout = QVBoxLayout(group)
 
-        # 使用配置中的快速动作
+        # 说明文字
+        info_label = QLabel("💡 点击按钮快速添加单个动作，或点击'多标签标注'同时选择多个动作")
+        info_label.setStyleSheet("color: #0078d4; font-size: 10px; margin: 5px;")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        # 快速单标签按钮
+        button_layout = QGridLayout()
+        button_layout.setSpacing(8)
+
         quick_actions = FacialActionConfig.QUICK_ACTIONS
-
         for i, english_action in enumerate(quick_actions):
             chinese_action = FacialActionConfig.get_chinese_label(english_action)
             color = FacialActionConfig.get_label_color(english_action)
@@ -312,19 +301,37 @@ class AnnotationPage(QWidget):
                     color: white;
                     font-weight: bold;
                     border-radius: 6px;
-                    padding: 8px;
-                    min-height: 20px;
-                    font-size: 11px;
+                    padding: 6px;
+                    min-height: 15px;
+                    font-size: 10px;
                 }}
                 QPushButton:hover {{
                     background-color: {QColor(color).lighter(110).name()};
                 }}
-                QPushButton:pressed {{
-                    background-color: {QColor(color).darker(110).name()};
-                }}
             """)
-            btn.clicked.connect(lambda checked, eng=english_action, color=color: self.quick_annotation(eng, color))
-            layout.addWidget(btn, i // 2, i % 2)
+            btn.clicked.connect(lambda checked, eng=english_action, color=color: self.quick_single_annotation(eng, color))
+            button_layout.addWidget(btn, i // 2, i % 2)
+
+        layout.addLayout(button_layout)
+
+        # 多标签标注按钮
+        multi_label_btn = QPushButton("🎯 多标签标注")
+        multi_label_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ColorPalette.PRIMARY};
+                color: white;
+                font-weight: bold;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {ColorPalette.PRIMARY_HOVER};
+            }}
+        """)
+        multi_label_btn.setToolTip("创建包含多个标签的标注，支持不同进度类型")
+        multi_label_btn.clicked.connect(self.create_multi_label_annotation)
+        layout.addWidget(multi_label_btn)
 
         return group
 
@@ -359,30 +366,30 @@ class AnnotationPage(QWidget):
 
     def setup_connections(self):
         """设置信号连接"""
-        # 设置键盘快捷键
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def keyPressEvent(self, event):
-        """键盘事件处理 - 添加快捷键支持"""
-        if event.key() == Qt.Key.Key_A:  # A键 - 后退
+        """键盘事件处理"""
+        if event.key() == Qt.Key.Key_A:
             self.prev_frame()
-        elif event.key() == Qt.Key.Key_D:  # D键 - 前进
+        elif event.key() == Qt.Key.Key_D:
             self.next_frame()
-        elif event.key() == Qt.Key.Key_Space:  # 空格键 - 播放/暂停
+        elif event.key() == Qt.Key.Key_Space:
             self.toggle_playback()
-        elif event.key() == Qt.Key.Key_S:  # S键 - 标记起点
+        elif event.key() == Qt.Key.Key_S:
             if self.mark_start_button.isEnabled():
                 self.mark_start()
-        elif event.key() == Qt.Key.Key_E:  # E键 - 标记终点
+        elif event.key() == Qt.Key.Key_E:
             if self.mark_end_button.isEnabled():
                 self.mark_end()
+        elif event.key() == Qt.Key.Key_M:  # M键 - 多标签标注
+            self.create_multi_label_annotation()
         else:
             super().keyPressEvent(event)
 
     def setup_video_connections(self):
         """设置视频相关连接"""
         if self.video_player and self.timeline:
-            # 视频播放器信号
             self.video_player.duration_changed.connect(self.timeline.set_duration)
             self.video_player.position_changed.connect(self.timeline.set_position)
             self.video_player.position_changed.connect(self.update_time_display)
@@ -390,7 +397,6 @@ class AnnotationPage(QWidget):
             self.video_player.video_loaded.connect(self.on_video_loaded)
             self.video_player.error_occurred.connect(self.show_error)
 
-            # 时间线信号
             self.timeline.position_changed.connect(self.video_player.seek)
             self.timeline.annotation_clicked.connect(self.on_annotation_clicked)
 
@@ -428,7 +434,6 @@ class AnnotationPage(QWidget):
         self.play_button.setEnabled(True)
         self.mark_start_button.setEnabled(True)
         self.mark_end_button.setEnabled(True)
-        # 启用逐帧控制
         self.prev_frame_button.setEnabled(True)
         self.next_frame_button.setEnabled(True)
 
@@ -463,28 +468,6 @@ class AnnotationPage(QWidget):
             new_pos = min(duration, current_pos + step_time)
             self.video_player.seek(new_pos)
 
-    def precise_seek(self):
-        """精确跳转到指定时间"""
-        if not self.video_player:
-            return
-        
-        from PyQt6.QtWidgets import QInputDialog
-        current_time = TimeUtils.format_time(self.video_player.get_position())
-        time_str, ok = QInputDialog.getText(
-            self, 
-            "精确定位", 
-            f"输入目标时间 (格式: MM:SS)\n当前时间: {current_time}",
-            text=current_time
-        )
-        
-        if ok and time_str:
-            target_time = TimeUtils.parse_time(time_str)
-            duration = self.video_player.get_duration()
-            if 0 <= target_time <= duration:
-                self.video_player.seek(target_time)
-            else:
-                QMessageBox.warning(self, "警告", f"时间超出范围 (0 - {TimeUtils.format_time(duration)})")
-
     def update_play_button(self, state):
         """更新播放按钮"""
         if state == QMediaPlayer.PlaybackState.PlayingState:
@@ -508,21 +491,19 @@ class AnnotationPage(QWidget):
         QMessageBox.critical(self, "错误", error_msg)
 
     def mark_start(self):
-        """标记起点 - 支持重新标记"""
+        """标记起点"""
         if self.video_player:
             self.temp_start_time = self.video_player.get_position()
             self.marking_start = True
-            
-            # 改变按钮状态，但保持启用以允许重新标记
+
             self.mark_start_button.setText(f"起点: {TimeUtils.format_time(self.temp_start_time)}")
             self.mark_start_button.setStyleSheet(f"QPushButton {{ background-color: {ColorPalette.WARNING}; }}")
-            
-            # 显示提示信息
-            QMessageBox.information(self, "起点已标记", 
+
+            QMessageBox.information(self, "起点已标记",
                 f"起点时间: {TimeUtils.format_time(self.temp_start_time)}\n\n可以重新点击'标记起点'来修改起点位置")
 
     def mark_end(self):
-        """标记终点 - 面部动作版本"""
+        """标记终点 - 使用多标签对话框"""
         if not self.marking_start:
             QMessageBox.warning(self, "警告", "请先标记起点")
             return
@@ -535,23 +516,21 @@ class AnnotationPage(QWidget):
             QMessageBox.warning(self, "警告", "终点时间必须大于起点时间")
             return
 
-        # 显示标注对话框
-        dialog = AnnotationDialog(self.temp_start_time, end_time, parent=self)
-        if dialog.exec() == AnnotationDialog.DialogCode.Accepted:
+        # 使用多标签对话框
+        dialog = MultiLabelAnnotationDialog(self.temp_start_time, end_time, parent=self)
+        if dialog.exec() == MultiLabelAnnotationDialog.DialogCode.Accepted:
             if dialog.validate_input():
                 annotation = AnnotationMarker(
                     start_time=self.temp_start_time,
                     end_time=end_time,
-                    label=dialog.get_english_label(),  # 存储英文标签
+                    labels=dialog.get_label_configs(),
                     color=dialog.get_color()
                 )
-                # 存储强度信息
-                annotation.intensity = dialog.get_intensity()
                 self.add_annotation(annotation)
                 self.reset_marking_state()
 
-    def quick_annotation(self, english_label: str, color: str):
-        """快速标注 - 面部动作版本"""
+    def quick_single_annotation(self, english_label: str, color: str):
+        """快速单标签标注"""
         if not self.marking_start:
             QMessageBox.warning(self, "警告", "请先标记起点")
             return
@@ -564,15 +543,48 @@ class AnnotationPage(QWidget):
             QMessageBox.warning(self, "警告", "终点时间必须大于起点时间")
             return
 
-        # 创建标注，使用英文标签存储
+        # 创建单标签配置
+        label_config = LabelConfig(
+            label=english_label,
+            intensity=1.0,
+            progression=ProgressionType.LINEAR
+        )
+
         annotation = AnnotationMarker(
             start_time=self.temp_start_time,
             end_time=end_time,
-            label=english_label,  # 存储英文标签
+            labels=[label_config],
             color=color
         )
         self.add_annotation(annotation)
         self.reset_marking_state()
+
+    def create_multi_label_annotation(self):
+        """创建多标签标注"""
+        if not self.marking_start:
+            QMessageBox.warning(self, "警告", "请先标记起点")
+            return
+
+        if not self.video_player:
+            return
+
+        end_time = self.video_player.get_position()
+        if end_time <= self.temp_start_time:
+            QMessageBox.warning(self, "警告", "终点时间必须大于起点时间")
+            return
+
+        # 使用多标签对话框
+        dialog = MultiLabelAnnotationDialog(self.temp_start_time, end_time, parent=self)
+        if dialog.exec() == MultiLabelAnnotationDialog.DialogCode.Accepted:
+            if dialog.validate_input():
+                annotation = AnnotationMarker(
+                    start_time=self.temp_start_time,
+                    end_time=end_time,
+                    labels=dialog.get_label_configs(),
+                    color=dialog.get_color()
+                )
+                self.add_annotation(annotation)
+                self.reset_marking_state()
 
     def reset_marking_state(self):
         """重置标记状态"""
@@ -589,13 +601,19 @@ class AnnotationPage(QWidget):
             QMessageBox.warning(self, "警告", "添加标注失败，可能存在时间重叠")
 
     def update_annotation_list(self):
-        """更新标注列表 - 显示中文但存储英文"""
+        """更新标注列表 - 支持多标签显示"""
         self.annotation_list.clear()
 
         for i, annotation in enumerate(self.annotation_manager.annotations):
-            # 显示中文标签
-            chinese_label = FacialActionConfig.get_chinese_label(annotation.label)
-            item_text = f"{i + 1}. {chinese_label} ({TimeUtils.format_time(annotation.start_time)} - {TimeUtils.format_time(annotation.end_time)})"
+            # 显示多标签信息
+            labels_text = annotation.display_labels
+            time_text = f"({TimeUtils.format_time(annotation.start_time)} - {TimeUtils.format_time(annotation.end_time)})"
+
+            if len(annotation.labels) > 1:
+                item_text = f"{i + 1}. 🎯 {labels_text} {time_text}"
+            else:
+                item_text = f"{i + 1}. {labels_text} {time_text}"
+
             item = QListWidgetItem(item_text)
             item.setData(Qt.ItemDataRole.UserRole, annotation)
 
@@ -606,7 +624,10 @@ class AnnotationPage(QWidget):
 
         # 更新统计
         stats = self.annotation_manager.get_statistics()
-        self.stats_label.setText(f"总计: {stats['total_count']} 个标注")
+        total_labels = sum(len(ann.labels) for ann in self.annotation_manager.annotations)
+        multi_label_count = sum(1 for ann in self.annotation_manager.annotations if len(ann.labels) > 1)
+
+        self.stats_label.setText(f"总计: {stats['total_count']} 个标注 | {total_labels} 个标签 | {multi_label_count} 个多标签")
 
     def edit_annotation(self, item: QListWidgetItem):
         """编辑标注（双击）"""
@@ -615,7 +636,7 @@ class AnnotationPage(QWidget):
             self.video_player.seek(annotation.start_time)
 
     def edit_selected_annotation(self):
-        """编辑选中的标注 - 面部动作版本"""
+        """编辑选中的标注 - 使用多标签对话框"""
         current_item = self.annotation_list.currentItem()
         if not current_item:
             QMessageBox.information(self, "提示", "请选择要编辑的标注")
@@ -623,32 +644,22 @@ class AnnotationPage(QWidget):
 
         annotation = current_item.data(Qt.ItemDataRole.UserRole)
         if annotation:
-            # 传递英文标签给对话框
-            dialog = AnnotationDialog(
+            dialog = MultiLabelAnnotationDialog(
                 annotation.start_time,
                 annotation.end_time,
-                annotation.label,  # 这里是英文标签
+                annotation,  # 传递现有标注
                 self
             )
-            dialog.selected_color = annotation.color
-            dialog.update_color_button()
 
-            # 如果有强度信息，设置强度
-            if hasattr(annotation, 'intensity'):
-                dialog.intensity_slider.setValue(int(annotation.intensity * 100))
-                dialog.intensity_spinbox.setValue(int(annotation.intensity * 100))
-
-            if dialog.exec() == AnnotationDialog.DialogCode.Accepted:
+            if dialog.exec() == MultiLabelAnnotationDialog.DialogCode.Accepted:
                 if dialog.validate_input():
-                    # 更新标注，存储英文标签
                     new_annotation = AnnotationMarker(
                         start_time=annotation.start_time,
                         end_time=annotation.end_time,
-                        label=dialog.get_english_label(),  # 存储英文标签
+                        labels=dialog.get_label_configs(),
                         color=dialog.get_color(),
                         id=annotation.id
                     )
-                    new_annotation.intensity = dialog.get_intensity()
 
                     if self.annotation_manager.update_annotation(annotation, new_annotation):
                         self.timeline.remove_annotation(annotation)
@@ -667,7 +678,7 @@ class AnnotationPage(QWidget):
             reply = QMessageBox.question(
                 self,
                 "确认删除",
-                f"确定要删除标注 '{annotation.label}' 吗？",
+                f"确定要删除标注 '{annotation.display_labels}' 吗？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
 
@@ -715,8 +726,7 @@ class AnnotationPage(QWidget):
             elif reply == QMessageBox.StandardButton.Cancel:
                 return
 
-        # 清空数据
-        self.annotation_manager = AnnotationManager()
+        self.annotation_manager = MultiLabelAnnotationManager()
         self.timeline.clear_annotations()
         self.update_annotation_list()
         if self.video_player:
@@ -733,16 +743,14 @@ class AnnotationPage(QWidget):
 
         if file_path:
             if self.annotation_manager.load_project(file_path):
-                # 重新加载界面
                 self.timeline.clear_annotations()
                 for annotation in self.annotation_manager.annotations:
                     self.timeline.add_annotation(annotation)
                 self.update_annotation_list()
 
-                # 尝试加载视频
                 if self.annotation_manager.video_info.file_path:
                     if self.load_video(self.annotation_manager.video_info.file_path):
-                        pass  # 视频加载成功
+                        pass
             else:
                 QMessageBox.critical(self, "错误", "项目加载失败")
 
@@ -774,8 +782,8 @@ class AnnotationPage(QWidget):
                 return False
         return False
 
-    def export_dataset(self):
-        """导出数据集 - 修复版本，导出后询问是否清空标注"""
+    def export_multi_label_dataset(self):
+        """导出多标签数据集"""
         if not self.annotation_manager.annotations:
             QMessageBox.warning(self, "警告", "暂无标注数据可导出为数据集")
             return
@@ -788,42 +796,36 @@ class AnnotationPage(QWidget):
             QMessageBox.warning(self, "警告", "视频文件不存在，无法导出数据集")
             return
 
-        # 使用修复版导出器
         try:
-            from dataset_exporter import simple_export_dataset
-            
-            # 执行导出
-            export_success = simple_export_dataset(
+            # 导入多标签导出器
+            from dataset_exporter import export_multi_label_dataset
+
+            export_success = export_multi_label_dataset(
                 self,
                 self.annotation_manager.video_info.file_path,
                 self.annotation_manager.annotations,
                 self.annotation_manager.video_info
             )
-            
-            # 修复：只有真正导出成功时才处理后续操作
+
             if export_success:
-                # 询问是否清空已导出的标注
                 reply = QMessageBox.question(
                     self,
                     "导出成功",
-                    "数据集导出成功！\n\n是否清空当前标注列表？\n(避免重复导出同一份数据)",
+                    "多标签数据集导出成功！\n\n是否清空当前标注列表？\n(避免重复导出同一份数据)",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes  # 默认选择Yes
+                    QMessageBox.StandardButton.Yes
                 )
-                
+
                 if reply == QMessageBox.StandardButton.Yes:
-                    # 清空标注但不清空项目设置
                     self.annotation_manager.clear_annotations()
                     self.timeline.clear_annotations()
                     self.update_annotation_list()
-                    
-                    # 显示清空确认
+
                     QMessageBox.information(
-                        self, 
-                        "标注已清空", 
+                        self,
+                        "标注已清空",
                         "标注列表已清空，可以继续添加新的标注。\n项目设置和视频文件保持不变。"
                     )
-            # 如果导出失败，simple_export_dataset 内部已经显示了错误消息
-            
+
         except Exception as e:
-            QMessageBox.critical(self, "导出错误", f"数据集导出失败: {str(e)}")
+            QMessageBox.critical(self, "导出错误", f"多标签数据集导出失败: {str(e)}")

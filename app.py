@@ -76,7 +76,7 @@ def main():
         
         # 尝试导入主窗口
         try:
-            from main_window import VideoAnnotationMainWindow
+            from main_window import MultiLabelVideoAnnotationMainWindow
             print("✅ 主窗口模块导入成功")
         except ImportError as e:
             print(f"❌ 导入主窗口失败: {e}")
@@ -99,7 +99,7 @@ def main():
         
         # 创建主窗口
         print("🔄 创建主窗口...")
-        window = VideoAnnotationMainWindow()
+        window = MultiLabelVideoAnnotationMainWindow()
         window.show()
         print("✅ 应用程序启动成功")
 
